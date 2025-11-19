@@ -1,0 +1,12 @@
+*.json
+*.png
+*.jpg
+*.jpeg
+*.ckpt
+*.pt
+*.pth
+
+logs/
+
+__pycache__/
+weigths/
