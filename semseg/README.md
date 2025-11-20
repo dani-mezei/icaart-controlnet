@@ -1,1 +1,1 @@
-# thesis
+# Semantic segmentation model
