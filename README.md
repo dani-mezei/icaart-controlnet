@@ -35,8 +35,8 @@ This repository contains two main components:
 - Python 3.8+
 - PyTorch 2.0+
 - PyTorch Lightning
-- Diffusers (HuggingFace)
-- Transformers (HuggingFace)
+- Diffusers (Hugging Face)
+- Transformers (Hugging Face)
 - Accelerate
 - torchvision
 - torchmetrics
@@ -121,7 +121,7 @@ python create_custom_data_pipeline.py \
 
 #### Training
 
-Training uses HuggingFace Accelerate for distributed training and memory optimization.
+Training uses Hugging Face Accelerate for distributed training and memory optimization.
 
 ```bash
 cd controlnet/training
@@ -190,7 +190,7 @@ data_dir/
   - Conditioned on semantic segmentation masks
   - BLIP2-generated captions
   - 512x512 resolution
-  - Training powered by HuggingFace Accelerate for distributed and mixed-precision training
+  - Training powered by Hugging Face Accelerate for distributed and mixed-precision training
 
 ## Reproducibility
 
@@ -218,10 +218,10 @@ If you use this code for your research, please cite our ICAART paper:
 
 ## License
 
-This project uses code adapted from HuggingFace Diffusers (Apache 2.0 License).
+This project uses code adapted from Hugging Face Diffusers (Apache 2.0 License).
 
 ## Acknowledgments
 
 - DeepLabV3 implementation from torchvision
-- ControlNet training based on HuggingFace Diffusers examples
+- ControlNet training based on Hugging Face Diffusers examples
 - BLIP2 for image captioning
