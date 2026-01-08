@@ -121,6 +121,8 @@ python create_custom_data_pipeline.py \
 
 #### Training
 
+Training uses HuggingFace Accelerate for distributed training and memory optimization.
+
 ```bash
 cd controlnet/training
 python run.py \
@@ -133,7 +135,7 @@ python run.py \
     --learning_rate 1e-5
 ```
 
-For multi-GPU training:
+For multi-GPU training (using Accelerate):
 ```bash
 python run.py \
     --multi_gpu \
@@ -188,6 +190,7 @@ data_dir/
   - Conditioned on semantic segmentation masks
   - BLIP2-generated captions
   - 512x512 resolution
+  - Training powered by HuggingFace Accelerate for distributed and mixed-precision training
 
 ## Reproducibility
 
