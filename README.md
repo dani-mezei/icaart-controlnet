@@ -1,12 +1,10 @@
 # ICAART ControlNet - Semantic Segmentation and Image Generation
 
-Supporting repository for the ICAART conference paper on semantic segmentation and ControlNet-based image generation for autonomous driving.
-
 ## Overview
 
 This repository contains two main components:
 
-1. **Semantic Segmentation (`semseg/`)**: Training and inference for DeepLabV3-ResNet101 model on driving scene datasets (KITTI, Cityscapes)
+1. **Semantic Segmentation (`semseg/`)**: Training and inference for DeepLabV3-ResNet model on driving scene datasets (KITTI, Cityscapes)
 2. **ControlNet (`controlnet/`)**: Training and inference for Stable Diffusion ControlNet conditioned on semantic segmentation masks
 
 ## Repository Structure
@@ -135,16 +133,6 @@ python run.py \
     --learning_rate 1e-5
 ```
 
-For multi-GPU training (using Accelerate):
-```bash
-python run.py \
-    --multi_gpu \
-    --num_gpus 2 \
-    --model_dir runwayml/stable-diffusion-v1-5 \
-    --data_dir /path/to/training/data \
-    --output_dir /path/to/output
-```
-
 Use JSON configuration:
 ```bash
 python run.py --load_json training_config.json
@@ -180,7 +168,7 @@ data_dir/
 
 ## Model Architecture
 
-- **Semantic Segmentation**: DeepLabV3 with ResNet-101 backbone
+- **Semantic Segmentation**: DeepLabV3 with ResNet-101 or ResNet-50 backbone
   - Pre-trained on ImageNet
   - Fine-tuned on driving scene datasets
   - 19 output classes
@@ -189,39 +177,13 @@ data_dir/
 - **ControlNet**: Stable Diffusion v1.5 with ControlNet conditioning
   - Conditioned on semantic segmentation masks
   - BLIP2-generated captions
-  - 512x512 resolution
-  - Training powered by Hugging Face Accelerate for distributed and mixed-precision training
 
 ## Reproducibility
 
-- Random seed: 42 (set across NumPy, PyTorch, PyTorch Lightning)
+- Random seed can be set in main (set across NumPy, PyTorch, PyTorch Lightning)
 - Deterministic training enabled where possible
 - GPU: NVIDIA GPUs with CUDA support recommended
-- Memory requirements:
-  - Semantic segmentation: ~8GB GPU memory
-  - ControlNet training: 12-38GB depending on configuration
-
-## Citation
-
-If you use this code for your research, please cite our ICAART paper:
-
-```bibtex
-@inproceedings{mezei2025icaart,
-  title={[Paper Title]},
-  author={Mezei, Daniel and [Co-authors]},
-  booktitle={Proceedings of the 17th International Conference on Agents and Artificial Intelligence (ICAART)},
-  year={2025}
-}
-```
-
-*Note: Update the citation with actual paper details once published.*
 
 ## License
 
 This project uses code adapted from Hugging Face Diffusers (Apache 2.0 License).
-
-## Acknowledgments
-
-- DeepLabV3 implementation from torchvision
-- ControlNet training based on Hugging Face Diffusers examples
-- BLIP2 for image captioning
