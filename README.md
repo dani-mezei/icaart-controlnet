@@ -204,12 +204,14 @@ If you use this code for your research, please cite our ICAART paper:
 
 ```bibtex
 @inproceedings{mezei2025icaart,
-  title={Your Paper Title},
-  author={Mezei, Dani and others},
-  booktitle={Proceedings of the International Conference on Agents and Artificial Intelligence (ICAART)},
+  title={[Paper Title]},
+  author={Mezei, Daniel and [Co-authors]},
+  booktitle={Proceedings of the 17th International Conference on Agents and Artificial Intelligence (ICAART)},
   year={2025}
 }
 ```
+
+*Note: Update the citation with actual paper details once published.*
 
 ## License
 
