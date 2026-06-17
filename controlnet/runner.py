@@ -29,19 +29,7 @@ PROJECT_ROOT = os.path.dirname(CONTROLNET_DIR)
 # Config loading
 # ---------------------------------------------------------------------------
 
-def load_config(args):
-    """Merge a JSON config file into *args*.
 
-    Keys present in the JSON but absent (None) on *args* are filled in.
-    Non-None CLI values always take precedence over the config file.
-    """
-    if hasattr(args, "config") and args.config:
-        with open(args.config, "r") as f:
-            config = json.load(f)
-        for key, value in config.items():
-            if not hasattr(args, key) or getattr(args, key) is None:
-                setattr(args, key, value)
-    return args
 
 
 # ---------------------------------------------------------------------------
@@ -61,13 +49,13 @@ def _build_prep_parser(subparsers):
     p.add_argument("--input_dir", type=str, default=None,
                     help="Path to input images for captioning.")
     p.add_argument("--caption_output_dir", type=str, default=None,
-                    help="Path to save generated captions. Defaults to --data_dir.")
+                    help="Path to save generated captions. Defaults to --dataset_dir.")
     p.add_argument("--question", type=str, default=None,
                     help="Question for BLIP2 visual QA captioning.")
     p.add_argument("--max_new_tokens", type=int, default=50)
     p.add_argument("--prompt_suffix", type=str, default="")
     # Data pipeline
-    p.add_argument("--data_dir", type=str, default=None,
+    p.add_argument("--dataset_dir", type=str, default=None,
                     help="Path to training data directory (must contain image/, mask/, prompt.jsonl).")
     p.add_argument("--dataset_name", type=str, default="data_pipeline",
                     help="Name for the HuggingFace dataset builder.")
@@ -76,22 +64,20 @@ def _build_prep_parser(subparsers):
 
 def run_prep(args):
     """Execute data preparation: optional captioning then pipeline configuration."""
-    args = load_config(args)
-
     env = _get_env()
 
     # Step 1: Captioning (optional)
     if args.blip2_dir:
         if not args.input_dir:
             raise ValueError("--input_dir is required when --blip2_dir is provided.")
-        if not args.caption_output_dir and not args.data_dir:
-            raise ValueError("Either --caption_output_dir or --data_dir is required when --blip2_dir is provided.")
+        if not args.caption_output_dir and not args.dataset_dir:
+            raise ValueError("Either --caption_output_dir or --dataset_dir is required when --blip2_dir is provided.")
         script = os.path.join(CONTROLNET_DIR, "captioning", "caption_generator.py")
         cmd = [
             sys.executable, script,
             "--blip2_dir", args.blip2_dir,
             "--input_dir", args.input_dir,
-            "--output_dir", args.caption_output_dir or args.data_dir,
+            "--output_dir", args.caption_output_dir or args.dataset_dir,
         ]
         if args.question:
             cmd.extend(["--question", args.question])
@@ -104,11 +90,11 @@ def run_prep(args):
         subprocess.run(cmd, check=True, env=env)
 
     # Step 2: Configure the HuggingFace data pipeline script
-    if args.data_dir:
+    if args.dataset_dir:
         script = os.path.join(CONTROLNET_DIR, "training", "create_custom_data_pipeline.py")
         cmd = [
             sys.executable, script,
-            "--data_dir", args.data_dir,
+            "--dataset_dir", args.dataset_dir,
             "--dataset_name", args.dataset_name,
         ]
         print(f"[prep] Creating data pipeline:\n  {' '.join(cmd)}")
@@ -228,8 +214,6 @@ def build_train_command(args):
 
 def run_train(args):
     """Configure the data pipeline, then launch ControlNet training."""
-    args = load_config(args)
-
     if not args.dataset_dir:
         raise ValueError("--dataset_dir is required for training.")
     if not args.model_dir:
@@ -243,7 +227,7 @@ def run_train(args):
     pipeline_script = os.path.join(CONTROLNET_DIR, "training", "create_custom_data_pipeline.py")
     prep_cmd = [
         sys.executable, pipeline_script,
-        "--data_dir", args.dataset_dir,
+        "--dataset_dir", args.dataset_dir,
     ]
     print(f"[train] Configuring data pipeline:\n  {' '.join(prep_cmd)}")
     subprocess.run(prep_cmd, check=True, env=env)
@@ -316,8 +300,6 @@ def build_infer_command(args):
 
 def run_infer(args):
     """Run ControlNet inference to generate images."""
-    args = load_config(args)
-
     if not args.controlnet_dir:
         raise ValueError("--controlnet_dir is required for inference.")
     if not args.stable_diffusion_dir:
@@ -346,7 +328,7 @@ def _get_env():
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main():
+def parse_args(args_list=None):
     parser = argparse.ArgumentParser(
         description="ControlNet Pipeline Runner - data prep, training, and inference.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -354,11 +336,34 @@ def main():
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    _build_prep_parser(subparsers)
-    _build_train_parser(subparsers)
-    _build_infer_parser(subparsers)
+    prep_parser = _build_prep_parser(subparsers)
+    train_parser = _build_train_parser(subparsers)
+    infer_parser = _build_infer_parser(subparsers)
 
-    args = parser.parse_args()
+    subparsers_map = {"prep": prep_parser, "train": train_parser, "infer": infer_parser}
+
+    # Pre-parse command and --config
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("command", nargs="?")
+    pre_parser.add_argument("--config", type=str, default=None)
+    pre_args, _ = pre_parser.parse_known_args(args_list)
+
+    if pre_args.config and pre_args.command in subparsers_map:
+        with open(pre_args.config, "r") as f:
+            config = json.load(f)
+
+        target_parser = subparsers_map[pre_args.command]
+        valid_keys = {action.dest for action in target_parser._actions}
+        for key in config:
+            if key not in valid_keys:
+                raise ValueError(f"Unknown config key: {key}")
+
+        target_parser.set_defaults(**config)
+
+    return parser, parser.parse_args(args_list)
+
+def main():
+    parser, args = parse_args()
 
     if args.command is None:
         parser.print_help()

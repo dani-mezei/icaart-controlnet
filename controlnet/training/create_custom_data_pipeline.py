@@ -5,7 +5,7 @@ import os
 def parse_args(input_args=None):
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--data_dir",
+    parser.add_argument("--dataset_dir",
                         type=str,
                         help="The directory where the data is stored."
                         )
@@ -20,7 +20,7 @@ def parse_args(input_args=None):
     else:
         args = parser.parse_args()
 
-    if args.data_dir is None:
+    if args.dataset_dir is None:
         raise ValueError("You must specify the data directory.")
 
     return args
@@ -61,7 +61,7 @@ def process_python_file(args):
     with open(data_pipeline_path, "r") as file:
         content = file.read()
 
-    content = replace_value(content, "DATA_DIR", args.data_dir, data_pipeline_path)
+    content = replace_value(content, "DATA_DIR", args.dataset_dir, data_pipeline_path)
     content = replace_value(content, "DATASET_NAME", args.dataset_name , data_pipeline_path)
 
     with open(data_pipeline_path, "w") as file:

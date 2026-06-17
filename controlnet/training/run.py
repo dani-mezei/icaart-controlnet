@@ -218,7 +218,7 @@ def main(args):
 
     # Customizing the data pipeline
     os.system(
-        f"python \"{abs_path_of_custom_data_pipeline}\" --data_dir \"{args.dataset_dir}\" --dataset_name \"{args.dataset_name}\"")
+        f"python \"{abs_path_of_custom_data_pipeline}\" --dataset_dir \"{args.dataset_dir}\" --dataset_name \"{args.dataset_name}\"")
 
     if args.use_sdxl:
         abs_path_of_training_script = os.path.join(

@@ -183,45 +183,56 @@ class TestBuildInferCommand:
         assert "--vae_dir" in cmd_str
 
 
-class TestLoadConfig:
-    """Tests for load_config()."""
+class TestConfigLoading:
+    """Tests for config loading via parse_args()."""
 
-    def test_config_fills_none_values(self):
-        """JSON config values fill in attributes that are None on the Namespace."""
-        from controlnet.runner import load_config
+    def test_config_overrides_defaults(self):
+        """JSON config values override argparse defaults."""
+        from controlnet.runner import parse_args
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump({"model_dir": "/from/config", "seed": 123}, f)
+            json.dump({"num_train_epochs": 100, "seed": 123}, f)
             config_path = f.name
 
         try:
-            args = argparse.Namespace(config=config_path, model_dir=None, seed=None)
-            result = load_config(args)
-            assert result.model_dir == "/from/config"
-            assert result.seed == 123
+            _, args = parse_args(["train", "--config", config_path])
+            assert args.num_train_epochs == 100
+            assert args.seed == 123
         finally:
             os.unlink(config_path)
 
     def test_cli_overrides_config(self):
-        """Explicit CLI values (non-None) are not overwritten by config."""
-        from controlnet.runner import load_config
+        """Explicit CLI values override config values."""
+        from controlnet.runner import parse_args
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump({"model_dir": "/from/config", "seed": 123}, f)
+            json.dump({"num_train_epochs": 100, "seed": 123}, f)
             config_path = f.name
 
         try:
-            args = argparse.Namespace(config=config_path, model_dir="/from/cli", seed=None)
-            result = load_config(args)
-            assert result.model_dir == "/from/cli"
-            assert result.seed == 123
+            _, args = parse_args(["train", "--config", config_path, "--seed", "456"])
+            assert args.num_train_epochs == 100
+            assert args.seed == 456
         finally:
             os.unlink(config_path)
 
-    def test_no_config_is_noop(self):
-        """When config is None, args are returned unchanged."""
-        from controlnet.runner import load_config
+    def test_unknown_config_key_raises(self):
+        """Unknown config keys raise a ValueError."""
+        from controlnet.runner import parse_args
 
-        args = argparse.Namespace(config=None, model_dir="/test")
-        result = load_config(args)
-        assert result.model_dir == "/test"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump({"unknown_key_xyz": "value"}, f)
+            config_path = f.name
+
+        try:
+            with pytest.raises(ValueError, match="Unknown config key: unknown_key_xyz"):
+                parse_args(["train", "--config", config_path])
+        finally:
+            os.unlink(config_path)
+
+    def test_no_config_uses_defaults(self):
+        """When no config is provided, defaults are used."""
+        from controlnet.runner import parse_args
+
+        _, args = parse_args(["train"])
+        assert args.num_train_epochs == 1  # Default value
