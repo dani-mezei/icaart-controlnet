@@ -13,7 +13,7 @@ import os
 import pandas as pd
 import numpy as np
 from PIL import Image
-from controlnet_diffusers.custom.utils import validate_dir, create_dir_if_not_exists
+from controlnet.custom.utils import validate_dir, create_dir_if_not_exists
 
 
 # Array fo the latents

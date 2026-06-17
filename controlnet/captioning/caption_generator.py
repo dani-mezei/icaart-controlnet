@@ -6,8 +6,8 @@ import json
 from PIL import Image
 import pandas as pd
 import cv2
-from controlnet_diffusers.custom.utils import validate_dir, create_dir_if_not_exists
-from controlnet_diffusers.captioning.blip2_captions_extractor import Blip2CaptionsExtractor
+from controlnet.custom.utils import validate_dir, create_dir_if_not_exists
+from controlnet.captioning.blip2_captions_extractor import Blip2CaptionsExtractor
 
 
 OUTPUT_FILE = "prompt.jsonl"

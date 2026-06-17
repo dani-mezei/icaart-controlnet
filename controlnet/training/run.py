@@ -1,7 +1,7 @@
 import argparse
 import os
 import json
-from controlnet_diffusers.custom.utils import validate_dir
+from controlnet.custom.utils import validate_dir
 
 
 def parse_args(input_args=None):
