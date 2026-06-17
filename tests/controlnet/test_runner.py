@@ -1,4 +1,4 @@
-"""Tests for controlnet.runner — command construction and config loading."""
+"""Tests for controlnet.runner - command construction and config loading."""
 import argparse
 import json
 import os

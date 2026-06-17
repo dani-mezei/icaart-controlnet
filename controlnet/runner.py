@@ -51,11 +51,11 @@ def load_config(args):
 def _build_prep_parser(subparsers):
     p = subparsers.add_parser(
         "prep",
-        help="Data preparation — captioning (optional) + data pipeline creation.",
+        help="Data preparation - captioning (optional) + data pipeline creation.",
     )
     p.add_argument("--config", type=str, default=None,
                     help="Path to JSON config file. CLI args override config values.")
-    # Captioning (optional — skipped if --blip2_dir is not set)
+    # Captioning (optional - skipped if --blip2_dir is not set)
     p.add_argument("--blip2_dir", type=str, default=None,
                     help="Path to BLIP2 model directory. If not set, captioning is skipped.")
     p.add_argument("--input_dir", type=str, default=None,
@@ -82,6 +82,10 @@ def run_prep(args):
 
     # Step 1: Captioning (optional)
     if args.blip2_dir:
+        if not args.input_dir:
+            raise ValueError("--input_dir is required when --blip2_dir is provided.")
+        if not args.caption_output_dir and not args.data_dir:
+            raise ValueError("Either --caption_output_dir or --data_dir is required when --blip2_dir is provided.")
         script = os.path.join(CONTROLNET_DIR, "captioning", "caption_generator.py")
         cmd = [
             sys.executable, script,
@@ -147,7 +151,7 @@ def _build_train_parser(subparsers):
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--gradient_accumulation_steps", type=int, default=1)
     p.add_argument("--dataloader_num_workers", type=int, default=4)
-    # A100 optimizations (on by default — use --no_* to disable)
+    # A100 optimizations (on by default - use --no_* to disable)
     p.add_argument("--no_gradient_checkpointing", action="store_true",
                     help="Disable gradient checkpointing.")
     p.add_argument("--no_8bit_adam", action="store_true",
@@ -225,6 +229,13 @@ def build_train_command(args):
 def run_train(args):
     """Configure the data pipeline, then launch ControlNet training."""
     args = load_config(args)
+
+    if not args.dataset_dir:
+        raise ValueError("--dataset_dir is required for training.")
+    if not args.model_dir:
+        raise ValueError("--model_dir is required for training.")
+    if not args.output_dir:
+        raise ValueError("--output_dir is required for training.")
 
     env = _get_env()
 
@@ -306,6 +317,14 @@ def build_infer_command(args):
 def run_infer(args):
     """Run ControlNet inference to generate images."""
     args = load_config(args)
+
+    if not args.controlnet_dir:
+        raise ValueError("--controlnet_dir is required for inference.")
+    if not args.stable_diffusion_dir:
+        raise ValueError("--stable_diffusion_dir is required for inference.")
+    if not args.input_data_dir:
+        raise ValueError("--input_data_dir is required for inference.")
+
     cmd = build_infer_command(args)
     print(f"[infer] Running inference:\n  {' '.join(cmd)}")
     subprocess.run(cmd, check=True, env=_get_env())
@@ -329,7 +348,7 @@ def _get_env():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="ControlNet Pipeline Runner — data prep, training, and inference.",
+        description="ControlNet Pipeline Runner - data prep, training, and inference.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
