@@ -1,0 +1,21 @@
+{
+    "model_dir": null,
+    "output_dir": null,
+    "dataset_dir": null,
+    "controlnet_dir": null,
+    "validation_data_dir": null,
+
+    "resolution": 512,
+    "train_batch_size": 4,
+    "num_train_epochs": 100,
+    "learning_rate": 1e-5,
+    "lr_scheduler": "constant",
+    "lr_warmup_steps": 500,
+    "lr_num_cycles": 1,
+    "lr_power": 1.0,
+    "checkpointing_steps": 500,
+    "validation_steps": 100,
+    "seed": 42,
+    "gradient_accumulation_steps": 1,
+    "dataloader_num_workers": 4
+}
