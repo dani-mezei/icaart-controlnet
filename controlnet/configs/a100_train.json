@@ -6,9 +6,9 @@
     "validation_data_dir": null,
 
     "resolution": 512,
-    "train_batch_size": 4,
-    "num_train_epochs": 100,
-    "learning_rate": 1e-5,
+    "train_batch_size": 128,
+    "num_train_epochs": 20,
+    "learning_rate": 1e-4,
     "lr_scheduler": "constant",
     "lr_warmup_steps": 500,
     "lr_num_cycles": 1,

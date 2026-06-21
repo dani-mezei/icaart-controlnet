@@ -119,6 +119,22 @@ def _build_train_parser(subparsers):
                     help="Directory to save trained ControlNet checkpoints.")
     p.add_argument("--dataset_dir", type=str, default=None,
                     help="Path to training data (image/, mask/, prompt.jsonl).")
+    p.add_argument("--streaming", action="store_true",
+                    help="Stream a private Hugging Face dataset instead of using --dataset_dir.")
+    p.add_argument("--hf_dataset_name", type=str, default=None,
+                    help="Private Hugging Face dataset repo or local dataset name used with --streaming.")
+    p.add_argument("--dataset_revision", type=str, default=None,
+                    help="Pinned Hugging Face dataset revision or commit SHA used with --streaming.")
+    p.add_argument("--train_split", type=str, default="train",
+                    help="Training split name for streaming datasets.")
+    p.add_argument("--validation_split", type=str, default="validation",
+                    help="Validation split name for streaming datasets.")
+    p.add_argument("--dataset_num_samples", type=int, default=None,
+                    help="Number of streamed training samples used to compute max_train_steps.")
+    p.add_argument("--streaming_shuffle_buffer", type=int, default=10000,
+                    help="Shuffle buffer size for Hugging Face IterableDataset streaming.")
+    p.add_argument("--streaming_validation_samples", type=int, default=3,
+                    help="Number of streamed validation masks to materialize for validation.")
     p.add_argument("--controlnet_dir", type=str, default=None,
                     help="Resume from a pretrained ControlNet checkpoint.")
     p.add_argument("--validation_data_dir", type=str, default=None,
@@ -137,6 +153,14 @@ def _build_train_parser(subparsers):
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--gradient_accumulation_steps", type=int, default=1)
     p.add_argument("--dataloader_num_workers", type=int, default=4)
+    p.add_argument("--max_train_samples", type=int, default=None,
+                    help="Limit training samples for smoke tests and VRAM probes.")
+    p.add_argument("--checkpoints_total_limit", type=int, default=None,
+                    help="Maximum number of checkpoints to keep.")
+    p.add_argument("--resume_from_checkpoint", type=str, default=None,
+                    help='Resume from a checkpoint path, or "latest".')
+    p.add_argument("--cuda_memory_fraction", type=float, default=None,
+                    help="Cap this process to a fraction of GPU VRAM, e.g. 0.80 on a shared A100.")
     # A100 optimizations (on by default - use --no_* to disable)
     p.add_argument("--no_gradient_checkpointing", action="store_true",
                     help="Disable gradient checkpointing.")
@@ -146,6 +170,8 @@ def _build_train_parser(subparsers):
                     help="Disable TF32 matmul acceleration.")
     p.add_argument("--no_set_grads_to_none", action="store_true",
                     help="Use zero_grad() instead of setting grads to None.")
+    p.add_argument("--enable_xformers", action="store_true",
+                    help="Enable xFormers memory efficient attention if installed.")
     # Multi-GPU
     p.add_argument("--multi_gpu", action="store_true",
                     help="Enable multi-GPU training via Accelerate.")
@@ -174,7 +200,6 @@ def build_train_command(args):
         train_script,
         f"--pretrained_model_name_or_path={args.model_dir}",
         f"--output_dir={args.output_dir}",
-        f"--train_data_dir={data_pipeline}",
         f"--seed={args.seed}",
         f"--resolution={args.resolution}",
         f"--learning_rate={args.learning_rate}",
@@ -189,6 +214,19 @@ def build_train_command(args):
         f"--gradient_accumulation_steps={args.gradient_accumulation_steps}",
         f"--dataloader_num_workers={args.dataloader_num_workers}",
     ])
+    if args.streaming:
+        cmd.extend([
+            f"--dataset_name={args.hf_dataset_name}",
+            "--streaming",
+            f"--dataset_revision={args.dataset_revision}",
+            f"--train_split={args.train_split}",
+            f"--validation_split={args.validation_split}",
+            f"--dataset_num_samples={args.dataset_num_samples}",
+            f"--streaming_shuffle_buffer={args.streaming_shuffle_buffer}",
+            f"--streaming_validation_samples={args.streaming_validation_samples}",
+        ])
+    else:
+        cmd.append(f"--train_data_dir={data_pipeline}")
 
     # --- optional paths ---
     if args.validation_data_dir:
@@ -198,6 +236,14 @@ def build_train_command(args):
         ])
     if args.controlnet_dir:
         cmd.append(f"--controlnet_model_name_or_path={args.controlnet_dir}")
+    if args.max_train_samples is not None:
+        cmd.append(f"--max_train_samples={args.max_train_samples}")
+    if args.checkpoints_total_limit is not None:
+        cmd.append(f"--checkpoints_total_limit={args.checkpoints_total_limit}")
+    if args.resume_from_checkpoint:
+        cmd.append(f"--resume_from_checkpoint={args.resume_from_checkpoint}")
+    if args.cuda_memory_fraction is not None:
+        cmd.append(f"--cuda_memory_fraction={args.cuda_memory_fraction}")
 
     # --- A100 optimizations (enabled unless explicitly disabled) ---
     if not args.no_gradient_checkpointing:
@@ -208,13 +254,22 @@ def build_train_command(args):
         cmd.append("--allow_tf32")
     if not args.no_set_grads_to_none:
         cmd.append("--set_grads_to_none")
+    if args.enable_xformers:
+        cmd.append("--enable_xformers_memory_efficient_attention")
 
     return cmd
 
 
 def run_train(args):
     """Configure the data pipeline, then launch ControlNet training."""
-    if not args.dataset_dir:
+    if args.streaming:
+        if not args.hf_dataset_name:
+            raise ValueError("--hf_dataset_name is required when --streaming is set.")
+        if not args.dataset_revision:
+            raise ValueError("--dataset_revision is required when --streaming is set.")
+        if args.dataset_num_samples is None:
+            raise ValueError("--dataset_num_samples is required when --streaming is set.")
+    elif not args.dataset_dir:
         raise ValueError("--dataset_dir is required for training.")
     if not args.model_dir:
         raise ValueError("--model_dir is required for training.")
@@ -223,14 +278,15 @@ def run_train(args):
 
     env = _get_env()
 
-    # Step 1: Patch data_pipeline.py with the dataset directory
-    pipeline_script = os.path.join(CONTROLNET_DIR, "training", "create_custom_data_pipeline.py")
-    prep_cmd = [
-        sys.executable, pipeline_script,
-        "--dataset_dir", args.dataset_dir,
-    ]
-    print(f"[train] Configuring data pipeline:\n  {' '.join(prep_cmd)}")
-    subprocess.run(prep_cmd, check=True, env=env)
+    # Step 1: Patch data_pipeline.py with the dataset directory for local datasets only.
+    if not args.streaming:
+        pipeline_script = os.path.join(CONTROLNET_DIR, "training", "create_custom_data_pipeline.py")
+        prep_cmd = [
+            sys.executable, pipeline_script,
+            "--dataset_dir", args.dataset_dir,
+        ]
+        print(f"[train] Configuring data pipeline:\n  {' '.join(prep_cmd)}")
+        subprocess.run(prep_cmd, check=True, env=env)
 
     # Step 2: Build and run the accelerate launch command
     cmd = build_train_command(args)
@@ -264,6 +320,19 @@ def _build_infer_parser(subparsers):
     p.add_argument("--width", type=int, default=512)
     p.add_argument("--num_inference_steps", type=int, default=20)
     p.add_argument("--num_images_per_prompt", type=int, default=1)
+    p.add_argument("--batch_size", type=int, default=1)
+    p.add_argument("--dtype", type=str, default="auto", choices=["auto", "fp32", "fp16", "bf16"])
+    p.add_argument("--cuda_memory_fraction", type=float, default=None)
+    p.add_argument("--enable_xformers", action="store_true")
+    p.add_argument("--enable_attention_slicing", action="store_true")
+    p.add_argument("--enable_vae_slicing", action="store_true")
+    p.add_argument("--channels_last", action="store_true")
+    p.add_argument("--skip_existing", action="store_true")
+    p.add_argument("--start_index", type=int, default=0)
+    p.add_argument("--end_index", type=int, default=None)
+    p.add_argument("--max_samples", type=int, default=None)
+    p.add_argument("--seed", type=int, default=None)
+    p.add_argument("--manifest_file", type=str, default="generation_manifest.jsonl")
     p.add_argument("--use_sdxl", action="store_true")
     p.add_argument("--vae_dir", type=str, default=None,
                     help="Path to VAE (only for SDXL).")
@@ -286,7 +355,31 @@ def build_infer_command(args):
         "--width", str(args.width),
         "--num_inference_steps", str(args.num_inference_steps),
         "--num_images_per_prompt", str(args.num_images_per_prompt),
+        "--batch_size", str(args.batch_size),
+        "--dtype", args.dtype,
     ]
+    if args.cuda_memory_fraction is not None:
+        cmd.extend(["--cuda_memory_fraction", str(args.cuda_memory_fraction)])
+    if args.enable_xformers:
+        cmd.append("--enable_xformers")
+    if args.enable_attention_slicing:
+        cmd.append("--enable_attention_slicing")
+    if args.enable_vae_slicing:
+        cmd.append("--enable_vae_slicing")
+    if args.channels_last:
+        cmd.append("--channels_last")
+    if args.skip_existing:
+        cmd.append("--skip_existing")
+    if args.start_index:
+        cmd.extend(["--start_index", str(args.start_index)])
+    if args.end_index is not None:
+        cmd.extend(["--end_index", str(args.end_index)])
+    if args.max_samples is not None:
+        cmd.extend(["--max_samples", str(args.max_samples)])
+    if args.seed is not None:
+        cmd.extend(["--seed", str(args.seed)])
+    if args.manifest_file:
+        cmd.extend(["--manifest_file", args.manifest_file])
     if args.mask_dir_name:
         cmd.extend(["--mask_dir_name", args.mask_dir_name])
     if args.prompt_file_name:
@@ -321,6 +414,7 @@ def _get_env():
     env = os.environ.copy()
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = PROJECT_ROOT + (os.pathsep + existing if existing else "")
+    env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True,max_split_size_mb:128")
     return env
 
 

@@ -1,1 +1,21 @@
 docs/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local environments
+.venv/
+.venv-*/
+venv/
+
+# Local Hugging Face caches
+.cache/
+hf/
+huggingface/
+
+# Local datasets and generated scratch artifacts
+data/
+scratch/
+patch_utf8.txt

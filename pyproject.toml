@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "icaart-controlnet"
+version = "0.1.0"
+description = "ControlNet training and inference utilities for the ICAART KITTI-360 experiments."
+readme = "controlnet/README.md"
+requires-python = ">=3.10,<3.12"
+dependencies = [
+    "accelerate>=0.31,<1",
+    "datasets>=2.20,<3",
+    "diffusers==0.30.3",
+    "huggingface-hub>=0.24,<1",
+    "numpy>=1.26,<2",
+    "opencv-python-headless>=4.9,<5",
+    "packaging>=23,<25",
+    "pandas>=2,<3",
+    "Pillow>=10,<12",
+    "safetensors>=0.4,<1",
+    "sentencepiece>=0.2,<1",
+    "tensorboard>=2.16,<3",
+    "tqdm>=4.66,<5",
+    "transformers>=4.43,<5",
+]
+
+[project.optional-dependencies]
+bnb = [
+    "bitsandbytes>=0.43.3,<1",
+]
+dev = [
+    "pytest>=8,<9",
+]
+wandb = [
+    "wandb>=0.17,<1",
+]
+
+[project.scripts]
+icaart-controlnet = "controlnet.runner:main"
+
+[tool.setuptools.packages.find]
+include = ["controlnet*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests/controlnet"]

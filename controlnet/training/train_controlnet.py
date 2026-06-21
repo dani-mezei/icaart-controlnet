@@ -16,6 +16,7 @@
 import argparse
 import contextlib
 import gc
+import json
 import logging
 import math
 import os
@@ -466,6 +467,15 @@ def parse_args(input_args=None):
         "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."
     )
     parser.add_argument(
+        "--cuda_memory_fraction",
+        type=float,
+        default=None,
+        help=(
+            "Optional per-process CUDA memory cap as a fraction of total GPU memory. "
+            "Use values like 0.75-0.90 on shared GPUs to fail fast instead of consuming the whole device."
+        ),
+    )
+    parser.add_argument(
         "--set_grads_to_none",
         action="store_true",
         help=(
@@ -489,6 +499,47 @@ def parse_args(input_args=None):
         type=str,
         default=None,
         help="The config of the Dataset, leave as None if there's only one config.",
+    )
+    parser.add_argument(
+        "--streaming",
+        action="store_true",
+        help="Stream the Hugging Face dataset instead of downloading/preparing it locally.",
+    )
+    parser.add_argument(
+        "--dataset_revision",
+        type=str,
+        default=None,
+        help="Pinned Hugging Face dataset revision or commit SHA used with --streaming.",
+    )
+    parser.add_argument(
+        "--train_split",
+        type=str,
+        default="train",
+        help="Training split name used with --streaming.",
+    )
+    parser.add_argument(
+        "--validation_split",
+        type=str,
+        default="validation",
+        help="Validation split name used with --streaming.",
+    )
+    parser.add_argument(
+        "--dataset_num_samples",
+        type=int,
+        default=None,
+        help="Number of streamed training samples used to compute max_train_steps.",
+    )
+    parser.add_argument(
+        "--streaming_shuffle_buffer",
+        type=int,
+        default=10000,
+        help="Shuffle buffer size for streamed training datasets.",
+    )
+    parser.add_argument(
+        "--streaming_validation_samples",
+        type=int,
+        default=3,
+        help="Number of streamed validation examples to materialize for validation.",
     )
     parser.add_argument(
         "--train_data_dir",
@@ -596,6 +647,18 @@ def parse_args(input_args=None):
     if args.dataset_name is not None and args.train_data_dir is not None:
         raise ValueError("Specify only one of `--dataset_name` or `--train_data_dir`")
 
+    if args.streaming:
+        if args.dataset_name is None:
+            raise ValueError("`--dataset_name` must be set when `--streaming` is used")
+        if args.dataset_revision is None:
+            raise ValueError("`--dataset_revision` must be set when `--streaming` is used")
+        if args.dataset_num_samples is None or args.dataset_num_samples < 1:
+            raise ValueError("`--dataset_num_samples` must be a positive integer when `--streaming` is used")
+        if args.streaming_shuffle_buffer < 1:
+            raise ValueError("`--streaming_shuffle_buffer` must be greater than 0")
+        if args.streaming_validation_samples < 0:
+            raise ValueError("`--streaming_validation_samples` must be non-negative")
+
     if args.proportion_empty_prompts < 0 or args.proportion_empty_prompts > 1:
         raise ValueError("`--proportion_empty_prompts` must be in the range [0, 1].")
 
@@ -605,22 +668,23 @@ def parse_args(input_args=None):
     if args.validation_prompt is None and args.validation_image is not None:
         raise ValueError("`--validation_prompt` must be set if `--validation_image` is set")
     
-    # Fetch the absolute path of the validation image directory
-    abs_validation_image = os.path.abspath(args.validation_image)
-    image_paths = os.listdir(os.path.join(abs_validation_image, "images"))
-    # Sort the image paths to ensure the order is consistent
-    image_paths.sort()
-    args.validation_image = [os.path.join(abs_validation_image, "images", i) for i in image_paths]
+    if args.validation_image is not None:
+        # Fetch the absolute path of the validation image directory
+        abs_validation_image = os.path.abspath(args.validation_image)
+        image_paths = os.listdir(os.path.join(abs_validation_image, "images"))
+        # Sort the image paths to ensure the order is consistent
+        image_paths.sort()
+        args.validation_image = [os.path.join(abs_validation_image, "images", i) for i in image_paths]
 
-    # Fetch the prompts from prompts.jsonl
-    abs_validation_prompt = os.path.abspath(args.validation_prompt)
-    args.validation_prompt = os.path.join(abs_validation_prompt, "prompt.jsonl")
-    
-    # Read from prompts.jsonl
-    prompts = pd.read_json(args.validation_prompt, lines=True)
-    # Sort the prompts to ensure the order is consistent
-    prompts = prompts.sort_values(by="image")
-    args.validation_prompt = prompts["prompt"].values.tolist()
+        # Fetch the prompts from prompts.jsonl
+        abs_validation_prompt = os.path.abspath(args.validation_prompt)
+        args.validation_prompt = os.path.join(abs_validation_prompt, "prompt.jsonl")
+
+        # Read from prompts.jsonl
+        prompts = pd.read_json(args.validation_prompt, lines=True)
+        # Sort the prompts to ensure the order is consistent
+        prompts = prompts.sort_values(by="image")
+        args.validation_prompt = prompts["prompt"].values.tolist()
 
     if (
         args.validation_image is not None
@@ -644,13 +708,100 @@ def parse_args(input_args=None):
     return args
 
 
+def configure_cuda_memory(args):
+    if args.cuda_memory_fraction is None:
+        return
+
+    if not 0 < args.cuda_memory_fraction <= 1:
+        raise ValueError("`--cuda_memory_fraction` must be in the range (0, 1].")
+
+    if not torch.cuda.is_available():
+        logger.warning("Ignoring --cuda_memory_fraction because CUDA is not available.")
+        return
+
+    torch.cuda.set_per_process_memory_fraction(args.cuda_memory_fraction)
+    total_gib = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    logger.info(
+        "CUDA memory cap set to %.2f of device 0 (%.1f GiB usable out of %.1f GiB total).",
+        args.cuda_memory_fraction,
+        total_gib * args.cuda_memory_fraction,
+        total_gib,
+    )
+
+
+def get_streaming_steps_per_epoch(args, num_processes):
+    total_batch_size = args.train_batch_size * args.gradient_accumulation_steps * num_processes
+    return math.ceil(args.dataset_num_samples / total_batch_size)
+
+
+def get_dataset_column_names(dataset, args):
+    column_names = getattr(dataset, "column_names", None)
+    if column_names:
+        return column_names
+    features = getattr(dataset, "features", None)
+    if features:
+        return list(features)
+    return [args.image_column, args.conditioning_image_column, args.caption_column]
+
+
+def set_streaming_epoch(dataset, epoch):
+    target = getattr(dataset, "dataset", dataset)
+    if hasattr(target, "set_epoch"):
+        target.set_epoch(epoch)
+
+
+def materialize_streaming_validation(args, accelerator):
+    if not args.streaming or args.validation_image is not None or args.streaming_validation_samples == 0:
+        return
+
+    validation_dir = Path(args.output_dir) / "streaming_validation"
+    image_dir = validation_dir / "images"
+    prompt_path = validation_dir / "prompt.jsonl"
+
+    if accelerator.is_main_process:
+        image_dir.mkdir(parents=True, exist_ok=True)
+        validation_dataset = load_dataset(
+            args.dataset_name,
+            args.dataset_config_name,
+            split=args.validation_split,
+            cache_dir=args.cache_dir,
+            streaming=True,
+            revision=args.dataset_revision,
+        )
+
+        with prompt_path.open("w", encoding="utf-8") as prompt_file:
+            for index, row in enumerate(validation_dataset.take(args.streaming_validation_samples)):
+                image_name = f"validation_{index:04d}.png"
+                mask = row[args.conditioning_image_column].convert("RGB")
+                mask.save(image_dir / image_name)
+                prompt_file.write(json.dumps({"image": image_name, "prompt": row[args.caption_column]}) + "\n")
+
+    accelerator.wait_for_everyone()
+
+    prompts = pd.read_json(prompt_path, lines=True)
+    prompts = prompts.sort_values(by="image")
+    args.validation_prompt = prompts["prompt"].values.tolist()
+    args.validation_image = [str(image_dir / image_name) for image_name in prompts["image"].values.tolist()]
+
+
 def make_train_dataset(args, tokenizer, accelerator):
     # Get the datasets: you can either provide your own training and evaluation files (see below)
     # or specify a Dataset from the hub (the dataset will be downloaded automatically from the datasets Hub).
 
     # In distributed training, the load_dataset function guarantees that only one local process can concurrently
     # download the dataset.
-    if args.dataset_name is not None:
+    if args.streaming:
+        train_dataset = load_dataset(
+            args.dataset_name,
+            args.dataset_config_name,
+            split=args.train_split,
+            cache_dir=args.cache_dir,
+            streaming=True,
+            revision=args.dataset_revision,
+        )
+        train_dataset = train_dataset.shuffle(seed=args.seed, buffer_size=args.streaming_shuffle_buffer)
+        dataset = {"train": train_dataset}
+    elif args.dataset_name is not None:
         # Downloading and loading a dataset from the hub.
         dataset = load_dataset(
             args.dataset_name,
@@ -669,7 +820,7 @@ def make_train_dataset(args, tokenizer, accelerator):
 
     # Preprocessing the datasets.
     # We need to tokenize inputs and targets.
-    column_names = dataset["train"].column_names
+    column_names = get_dataset_column_names(dataset["train"], args)
 
     # 6. Get the column names for input/target.
     if args.image_column is None:
@@ -764,6 +915,13 @@ def make_train_dataset(args, tokenizer, accelerator):
         return examples
 
     with accelerator.main_process_first():
+        if args.streaming:
+            train_dataset = dataset["train"]
+            if args.max_train_samples is not None:
+                train_dataset = train_dataset.take(args.max_train_samples)
+            train_dataset = train_dataset.map(preprocess_train, batched=True)
+            return train_dataset
+
         if args.max_train_samples is not None:
             dataset["train"] = dataset["train"].shuffle(seed=args.seed).select(range(args.max_train_samples))
         # Set the training transforms
@@ -794,6 +952,7 @@ def main(args):
             "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
             " Please use `huggingface-cli login` to authenticate with the Hub."
         )
+    configure_cuda_memory(args)
 
     logging_dir = Path(args.output_dir, args.logging_dir)
 
@@ -833,6 +992,8 @@ def main(args):
             repo_id = create_repo(
                 repo_id=args.hub_model_id or Path(args.output_dir).name, exist_ok=True, token=args.hub_token
             ).repo_id
+
+    materialize_streaming_validation(args, accelerator)
 
     # Load the tokenizer
     if args.tokenizer_name:
@@ -974,7 +1135,7 @@ def main(args):
 
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
-        shuffle=True,
+        shuffle=not args.streaming,
         collate_fn=collate_fn,
         batch_size=args.train_batch_size,
         num_workers=args.dataloader_num_workers,
@@ -982,7 +1143,10 @@ def main(args):
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    if args.streaming:
+        num_update_steps_per_epoch = get_streaming_steps_per_epoch(args, accelerator.num_processes)
+    else:
+        num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if args.max_train_steps is None:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
@@ -1015,7 +1179,10 @@ def main(args):
     text_encoder.to(accelerator.device, dtype=weight_dtype)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    if args.streaming:
+        num_update_steps_per_epoch = get_streaming_steps_per_epoch(args, accelerator.num_processes)
+    else:
+        num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
@@ -1036,8 +1203,10 @@ def main(args):
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
     logger.info("***** Running training *****")
-    logger.info(f"  Num examples = {len(train_dataset)}")
-    logger.info(f"  Num batches each epoch = {len(train_dataloader)}")
+    num_examples = args.dataset_num_samples if args.streaming else len(train_dataset)
+    num_batches = "streaming" if args.streaming else len(train_dataloader)
+    logger.info(f"  Num examples = {num_examples}")
+    logger.info(f"  Num batches each epoch = {num_batches}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
     logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
@@ -1083,6 +1252,8 @@ def main(args):
 
     image_logs = None
     for epoch in range(first_epoch, args.num_train_epochs):
+        if args.streaming:
+            set_streaming_epoch(train_dataloader.dataset, epoch)
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(controlnet):
                 # Convert images to latent space

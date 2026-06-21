@@ -12,6 +12,14 @@ def _make_train_args(**overrides):
         model_dir="/models/sd15",
         output_dir="/output",
         dataset_dir="/data",
+        streaming=False,
+        hf_dataset_name=None,
+        dataset_revision=None,
+        train_split="train",
+        validation_split="validation",
+        dataset_num_samples=None,
+        streaming_shuffle_buffer=10000,
+        streaming_validation_samples=3,
         controlnet_dir=None,
         validation_data_dir=None,
         resolution=512,
@@ -27,6 +35,11 @@ def _make_train_args(**overrides):
         seed=42,
         gradient_accumulation_steps=1,
         dataloader_num_workers=4,
+        max_train_samples=None,
+        checkpoints_total_limit=None,
+        resume_from_checkpoint=None,
+        cuda_memory_fraction=None,
+        enable_xformers=False,
         multi_gpu=False,
         num_gpus=1,
         no_gradient_checkpointing=False,
@@ -129,6 +142,49 @@ class TestBuildTrainCommand:
         assert "--num_train_epochs=50" in cmd_str
         assert "--resolution=768" in cmd_str
 
+    def test_shared_gpu_controls_forwarded(self):
+        """Memory cap, sample limit, checkpoint limit, resume, and xFormers are forwarded."""
+        from controlnet.runner import build_train_command
+
+        cmd = build_train_command(_make_train_args(
+            max_train_samples=32,
+            checkpoints_total_limit=3,
+            resume_from_checkpoint="latest",
+            cuda_memory_fraction=0.85,
+            enable_xformers=True,
+        ))
+        cmd_str = " ".join(cmd)
+
+        assert "--max_train_samples=32" in cmd_str
+        assert "--checkpoints_total_limit=3" in cmd_str
+        assert "--resume_from_checkpoint=latest" in cmd_str
+        assert "--cuda_memory_fraction=0.85" in cmd_str
+        assert "--enable_xformers_memory_efficient_attention" in cmd_str
+
+    def test_streaming_dataset_flags(self):
+        """Streaming mode uses --dataset_name and does not pass the local data pipeline."""
+        from controlnet.runner import build_train_command
+
+        cmd = build_train_command(_make_train_args(
+            streaming=True,
+            hf_dataset_name="user/private-kitti360-controlnet",
+            dataset_revision="abc123",
+            dataset_num_samples=5000,
+            train_split="train",
+            validation_split="validation",
+            streaming_shuffle_buffer=2048,
+            streaming_validation_samples=2,
+        ))
+        cmd_str = " ".join(cmd)
+
+        assert "--streaming" in cmd_str
+        assert "--dataset_name=user/private-kitti360-controlnet" in cmd_str
+        assert "--dataset_revision=abc123" in cmd_str
+        assert "--dataset_num_samples=5000" in cmd_str
+        assert "--streaming_shuffle_buffer=2048" in cmd_str
+        assert "--streaming_validation_samples=2" in cmd_str
+        assert "--train_data_dir=" not in cmd_str
+
 
 class TestBuildInferCommand:
     """Tests for build_infer_command()."""
@@ -148,6 +204,19 @@ class TestBuildInferCommand:
             width=512,
             num_inference_steps=20,
             num_images_per_prompt=1,
+            batch_size=1,
+            dtype="auto",
+            cuda_memory_fraction=None,
+            enable_xformers=False,
+            enable_attention_slicing=False,
+            enable_vae_slicing=False,
+            channels_last=False,
+            skip_existing=False,
+            start_index=0,
+            end_index=None,
+            max_samples=None,
+            seed=None,
+            manifest_file="generation_manifest.jsonl",
             use_sdxl=False,
             vae_dir=None,
         )
@@ -173,6 +242,19 @@ class TestBuildInferCommand:
             width=1024,
             num_inference_steps=20,
             num_images_per_prompt=1,
+            batch_size=1,
+            dtype="auto",
+            cuda_memory_fraction=None,
+            enable_xformers=False,
+            enable_attention_slicing=False,
+            enable_vae_slicing=False,
+            channels_last=False,
+            skip_existing=False,
+            start_index=0,
+            end_index=None,
+            max_samples=None,
+            seed=None,
+            manifest_file="generation_manifest.jsonl",
             use_sdxl=True,
             vae_dir="/models/sdxl-vae",
         )
@@ -181,6 +263,54 @@ class TestBuildInferCommand:
 
         assert "--use_sdxl" in cmd_str
         assert "--vae_dir" in cmd_str
+
+    def test_shared_gpu_inference_controls(self):
+        """Inference forwards batch, dtype, memory cap, and memory-saving flags."""
+        from controlnet.runner import build_infer_command
+
+        args = argparse.Namespace(
+            controlnet_dir="/ckpts/controlnet",
+            stable_diffusion_dir="/models/sd15",
+            input_data_dir="/data/test",
+            mask_dir_name="mask",
+            prompt_file_name="prompt.jsonl",
+            output_dir="./output",
+            height=512,
+            width=512,
+            num_inference_steps=20,
+            num_images_per_prompt=1,
+            batch_size=1,
+            dtype="fp16",
+            cuda_memory_fraction=0.85,
+            enable_xformers=True,
+            enable_attention_slicing=True,
+            enable_vae_slicing=True,
+            channels_last=True,
+            skip_existing=True,
+            start_index=5,
+            end_index=20,
+            max_samples=4,
+            seed=123,
+            manifest_file="manifest.jsonl",
+            use_sdxl=False,
+            vae_dir=None,
+        )
+        cmd = build_infer_command(args)
+        cmd_str = " ".join(cmd)
+
+        assert "--batch_size 1" in cmd_str
+        assert "--dtype fp16" in cmd_str
+        assert "--cuda_memory_fraction 0.85" in cmd_str
+        assert "--enable_xformers" in cmd_str
+        assert "--enable_attention_slicing" in cmd_str
+        assert "--enable_vae_slicing" in cmd_str
+        assert "--channels_last" in cmd_str
+        assert "--skip_existing" in cmd_str
+        assert "--start_index 5" in cmd_str
+        assert "--end_index 20" in cmd_str
+        assert "--max_samples 4" in cmd_str
+        assert "--seed 123" in cmd_str
+        assert "--manifest_file manifest.jsonl" in cmd_str
 
 
 class TestConfigLoading:

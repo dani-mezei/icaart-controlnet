@@ -10,6 +10,7 @@ import torch
 import argparse
 import json
 import os
+import time
 import pandas as pd
 import numpy as np
 from PIL import Image
@@ -20,8 +21,6 @@ from controlnet.custom.utils import validate_dir, create_dir_if_not_exists
 latent_repr = []
 # Max number of saved latents
 MAX_SAVED_LATENTS = 10
-# Number of masks processed in paralel in the pipeline
-BATCH_SIZE = 4
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -101,6 +100,67 @@ def parse_args(input_args=None):
                         help=" The output format of the generated image. Choose between PIL.Image or np.array."
                         "`pil` or `np`. Default is `pil`."
                         )
+    parser.add_argument("--batch_size",
+                        type=int,
+                        default=1,
+                        help="Number of masks/prompts processed together. Use 1 on shared GPUs."
+                        )
+    parser.add_argument("--dtype",
+                        type=str,
+                        default="auto",
+                        choices=["auto", "fp32", "fp16", "bf16"],
+                        help="Pipeline dtype. auto uses fp16 on CUDA and fp32 on CPU."
+                        )
+    parser.add_argument("--cuda_memory_fraction",
+                        type=float,
+                        default=None,
+                        help="Optional per-process CUDA memory cap, e.g. 0.80 on a shared A100."
+                        )
+    parser.add_argument("--enable_xformers",
+                        action="store_true",
+                        help="Enable xFormers memory efficient attention if installed."
+                        )
+    parser.add_argument("--enable_attention_slicing",
+                        action="store_true",
+                        help="Reduce inference peak VRAM at the cost of speed."
+                        )
+    parser.add_argument("--enable_vae_slicing",
+                        action="store_true",
+                        help="Reduce VAE decode memory for multi-image batches."
+                        )
+    parser.add_argument("--channels_last",
+                        action="store_true",
+                        help="Use channels_last memory format for CUDA UNet/ControlNet modules."
+                        )
+    parser.add_argument("--skip_existing",
+                        action="store_true",
+                        help="Skip samples whose output file already exists."
+                        )
+    parser.add_argument("--start_index",
+                        type=int,
+                        default=0,
+                        help="Start index, inclusive, after sorting inputs."
+                        )
+    parser.add_argument("--end_index",
+                        type=int,
+                        default=None,
+                        help="End index, exclusive, after sorting inputs."
+                        )
+    parser.add_argument("--max_samples",
+                        type=int,
+                        default=None,
+                        help="Maximum number of samples to process after applying start/end indices."
+                        )
+    parser.add_argument("--seed",
+                        type=int,
+                        default=None,
+                        help="Base seed. Per-sample seed is seed + absolute sample index."
+                        )
+    parser.add_argument("--manifest_file",
+                        type=str,
+                        default="generation_manifest.jsonl",
+                        help="JSONL manifest filename or path. Relative paths are placed inside output_dir."
+                        )
     parser.add_argument("--latent_denoising_steps",
                         action="store_true",
                         help="If set, the latents will be converted to rgb images at each denoising step."
@@ -131,6 +191,16 @@ def parse_args(input_args=None):
 
     if args.num_inference_steps < 1:
         raise ValueError("Number of inference steps must be greater than 0.")
+    if args.batch_size < 1:
+        raise ValueError("Batch size must be greater than 0.")
+    if args.cuda_memory_fraction is not None and not 0 < args.cuda_memory_fraction <= 1:
+        raise ValueError("`--cuda_memory_fraction` must be in the range (0, 1].")
+    if args.start_index < 0:
+        raise ValueError("Start index must be non-negative.")
+    if args.end_index is not None and args.end_index < args.start_index:
+        raise ValueError("End index must be greater than or equal to start index.")
+    if args.max_samples is not None and args.max_samples < 1:
+        raise ValueError("Max samples must be greater than 0.")
 
     input_dir_content = os.listdir(args.input_data_dir)
     if args.mask_dir_name not in input_dir_content:
@@ -161,15 +231,43 @@ def parse_args(input_args=None):
 
     args.output_dir = os.path.abspath(args.output_dir)
     create_dir_if_not_exists(args.output_dir)
+    if not os.path.isabs(args.manifest_file):
+        args.manifest_file = os.path.join(args.output_dir, args.manifest_file)
 
     return args
 
 
-def read_images(input_dir, mask_dir, multi_control=False):
-    image_dir = os.path.join(input_dir, mask_dir)
-    images = os.listdir(image_dir)
-    images.sort()
+def resolve_dtype(dtype):
+    if dtype == "auto":
+        return torch.float16 if torch.cuda.is_available() else torch.float32
+    if dtype == "fp16":
+        return torch.float16
+    if dtype == "bf16":
+        return torch.bfloat16
+    return torch.float32
 
+
+def configure_cuda_memory(args):
+    if args.cuda_memory_fraction is None:
+        return
+    if not torch.cuda.is_available():
+        print("Ignoring --cuda_memory_fraction because CUDA is not available.")
+        return
+    torch.cuda.set_per_process_memory_fraction(args.cuda_memory_fraction)
+    total_gib = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    usable_gib = total_gib * args.cuda_memory_fraction
+    print(f"CUDA memory cap set to {usable_gib:.1f} GiB of {total_gib:.1f} GiB.")
+
+
+def list_image_names(input_dir, mask_dir):
+    image_dir = os.path.join(input_dir, mask_dir)
+    images = [name for name in os.listdir(image_dir) if os.path.isfile(os.path.join(image_dir, name))]
+    return sorted(images)
+
+
+def read_images(input_dir, mask_dir, image_names=None, multi_control=False):
+    image_dir = os.path.join(input_dir, mask_dir)
+    images = sorted(os.listdir(image_dir)) if image_names is None else image_names
     image_names = []
     if multi_control:
         image_list = []
@@ -205,6 +303,86 @@ def read_prompts(input_dir, prompt_file):
     return prompt_list
 
 
+def read_prompt_records(input_dir, prompt_file):
+    prompt_file = os.path.join(input_dir, prompt_file)
+    prompts = pd.read_json(prompt_file, lines=True)
+    prompts = prompts.sort_values(by="image")
+    return [{"image": row["image"], "prompt": row["prompt"]} for _, row in prompts.iterrows()]
+
+
+def build_generation_samples(image_names, prompt_records, output_dir):
+    prompts_by_image = {record["image"]: record["prompt"] for record in prompt_records}
+    samples = []
+    for index, image_name in enumerate(image_names):
+        if image_name not in prompts_by_image:
+            raise ValueError(f"Missing prompt for image {image_name}.")
+        samples.append(
+            {
+                "index": index,
+                "image": image_name,
+                "prompt": prompts_by_image[image_name],
+                "output_path": os.path.join(output_dir, image_name),
+            }
+        )
+    return samples
+
+
+def filter_samples(samples, start_index=0, end_index=None, max_samples=None):
+    selected = samples[start_index:end_index]
+    if max_samples is not None:
+        selected = selected[:max_samples]
+    return selected
+
+
+def filter_existing_samples(samples, skip_existing=False):
+    if not skip_existing:
+        return samples
+    return [sample for sample in samples if not os.path.exists(sample["output_path"])]
+
+
+def manifest_row(sample, status, seed=None, elapsed_seconds=None, error=None):
+    return {
+        "image": sample["image"],
+        "prompt": sample["prompt"],
+        "output_path": sample["output_path"],
+        "seed": seed,
+        "status": status,
+        "elapsed_seconds": elapsed_seconds,
+        "error": error,
+    }
+
+
+def append_manifest(manifest_file, row):
+    manifest_dir = os.path.dirname(os.path.abspath(manifest_file))
+    create_dir_if_not_exists(manifest_dir)
+    with open(manifest_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+
+
+def chunks(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i:i+n]
+
+
+def load_sample_images(input_dir, mask_dir, samples, multi_control=False):
+    if multi_control:
+        raise NotImplementedError("Range-based lazy loading is not implemented for multiple ControlNets.")
+    return [load_image(os.path.join(input_dir, mask_dir, sample["image"])) for sample in samples]
+
+
+def sample_seed(base_seed, sample):
+    return None if base_seed is None else base_seed + sample["index"]
+
+
+def batch_generator(base_seed, batch):
+    if base_seed is None:
+        return None
+    seeds = [sample_seed(base_seed, sample) for sample in batch]
+    if len(set(seeds)) == 1:
+        return torch.Generator(device=DEVICE).manual_seed(seeds[0])
+    return [torch.Generator(device=DEVICE).manual_seed(seed) for seed in seeds]
+
+
 # See an alternative solution here:
 # https://huggingface.co/blog/TimothyAlexisVass/explaining-the-sdxl-latent-space
 def latents_to_rgb(pipe, latents):
@@ -238,10 +416,8 @@ def decode_tensors(pipe, step, timestep, callback_kwargs):
 
 
 def main(args):
-    if args.use_sdxl:
-        data_type = torch.float16
-    else:
-        data_type = torch.float32
+    configure_cuda_memory(args)
+    data_type = resolve_dtype(args.dtype)
 
     if type(args.controlnet_dir) == list:
         multi_control = True
@@ -263,38 +439,119 @@ def main(args):
             args.stable_diffusion_dir, controlnet=controlnet, torch_dtype=data_type, safety_checker=None).to(DEVICE)
     
     pipeline.scheduler = UniPCMultistepScheduler.from_config(pipeline.scheduler.config)
+    if args.enable_xformers:
+        pipeline.enable_xformers_memory_efficient_attention()
+    if args.enable_attention_slicing:
+        pipeline.enable_attention_slicing()
+    if args.enable_vae_slicing:
+        pipeline.enable_vae_slicing()
+    if args.channels_last and torch.cuda.is_available():
+        if isinstance(controlnet, list):
+            for controlnet_model in controlnet:
+                controlnet_model.to(memory_format=torch.channels_last)
+        else:
+            controlnet.to(memory_format=torch.channels_last)
+        pipeline.unet.to(memory_format=torch.channels_last)
     
-    images, image_names = read_images(args.input_data_dir, args.mask_dir_name, multi_control)
-    prompts = read_prompts(args.input_data_dir, args.prompt_file_name)
+    if multi_control:
+        if args.start_index or args.end_index is not None or args.max_samples is not None or args.skip_existing:
+            raise NotImplementedError("Range filtering and skip_existing are only implemented for a single ControlNet.")
+        images, image_names = read_images(args.input_data_dir, args.mask_dir_name, multi_control=True)
+        prompts = read_prompts(args.input_data_dir, args.prompt_file_name)
+        samples = build_generation_samples(image_names, [{"image": name, "prompt": prompt} for name, prompt in zip(image_names, prompts)], args.output_dir)
+    else:
+        image_names = list_image_names(args.input_data_dir, args.mask_dir_name)
+        prompt_records = read_prompt_records(args.input_data_dir, args.prompt_file_name)
+        samples = build_generation_samples(image_names, prompt_records, args.output_dir)
+        samples = filter_samples(samples, args.start_index, args.end_index, args.max_samples)
+        samples = filter_existing_samples(samples, args.skip_existing)
 
     # Print the number of images and prompts
-    print(f"Number of images: {len(images)}")
-    print(f"Number of prompts: {len(prompts)}")
+    print(f"Number of selected samples: {len(samples)}")
 
-    with torch.no_grad():
-        def chunks(lst, n):
-            for i in range(0, len(lst), n):
-                yield lst[i:i+n]
+    with torch.inference_mode():
+        sample_batches = list(chunks(samples, args.batch_size))
+        if multi_control:
+            prompts = list(chunks(prompts, args.batch_size))
+            images = list(chunks(images, args.batch_size))
+            image_names = list(chunks(image_names, args.batch_size))
 
-        prompts = list(chunks(prompts, BATCH_SIZE))
-        images = list(chunks(images, BATCH_SIZE))
-        image_names = list(chunks(image_names,  BATCH_SIZE))
+            for prompt_batch, image_batch, name_batch, sample_batch in zip(prompts, images, image_names, sample_batches):
+                start_time = time.perf_counter()
+                try:
+                    generated_images = pipeline(
+                        prompt=prompt_batch,
+                        image=image_batch,
+                        height=args.height,
+                        width=args.width,
+                        num_inference_steps=args.num_inference_steps,
+                        num_images_per_prompt=args.num_images_per_prompt,
+                        generator=batch_generator(args.seed, sample_batch),
+                        callback_on_step_end=decode_tensors if args.latent_denoising_steps else None,
+                        callback_on_step_end_tensor_inputs=["latents"] if args.latent_denoising_steps else None,
+                    )
 
-        for prompt_batch, image_batch, name_batch in zip(prompts, images, image_names):
-            generated_images = pipeline(
-                prompt=prompt_batch,
-                image=image_batch,
-                height=args.height,
-                width=args.width,
-                num_inference_steps=args.num_inference_steps,
-                num_images_per_prompt=args.num_images_per_prompt,
-                callback_on_step_end=decode_tensors if args.latent_denoising_steps else None,
-                callback_on_step_end_tensor_inputs=["latents"] if args.latent_denoising_steps else None,
-            )
+                    elapsed_seconds = time.perf_counter() - start_time
+                    for image, name, sample in zip(generated_images.images, name_batch, sample_batch):
+                        image.save(os.path.join(args.output_dir, name))
+                        append_manifest(
+                            args.manifest_file,
+                            manifest_row(sample, "success", seed=sample_seed(args.seed, sample), elapsed_seconds=elapsed_seconds),
+                        )
+                except Exception as ex:
+                    elapsed_seconds = time.perf_counter() - start_time
+                    for sample in sample_batch:
+                        append_manifest(
+                            args.manifest_file,
+                            manifest_row(
+                                sample,
+                                "error",
+                                seed=sample_seed(args.seed, sample),
+                                elapsed_seconds=elapsed_seconds,
+                                error=str(ex),
+                            ),
+                        )
+                    raise
+            return
 
-            for image, name in zip(generated_images.images, name_batch):
-                # Add to file name to which prompt it belongs
-                image.save(os.path.join(args.output_dir, name))
+        for sample_batch in sample_batches:
+            start_time = time.perf_counter()
+            try:
+                prompt_batch = [sample["prompt"] for sample in sample_batch]
+                image_batch = load_sample_images(args.input_data_dir, args.mask_dir_name, sample_batch, multi_control)
+                generated_images = pipeline(
+                    prompt=prompt_batch,
+                    image=image_batch,
+                    height=args.height,
+                    width=args.width,
+                    num_inference_steps=args.num_inference_steps,
+                    num_images_per_prompt=args.num_images_per_prompt,
+                    generator=batch_generator(args.seed, sample_batch),
+                    callback_on_step_end=decode_tensors if args.latent_denoising_steps else None,
+                    callback_on_step_end_tensor_inputs=["latents"] if args.latent_denoising_steps else None,
+                )
+
+                elapsed_seconds = time.perf_counter() - start_time
+                for image, sample in zip(generated_images.images, sample_batch):
+                    image.save(sample["output_path"])
+                    append_manifest(
+                        args.manifest_file,
+                        manifest_row(sample, "success", seed=sample_seed(args.seed, sample), elapsed_seconds=elapsed_seconds),
+                    )
+            except Exception as ex:
+                elapsed_seconds = time.perf_counter() - start_time
+                for sample in sample_batch:
+                    append_manifest(
+                        args.manifest_file,
+                        manifest_row(
+                            sample,
+                            "error",
+                            seed=sample_seed(args.seed, sample),
+                            elapsed_seconds=elapsed_seconds,
+                            error=str(ex),
+                        ),
+                    )
+                raise
 
 
         # Save the latents as images

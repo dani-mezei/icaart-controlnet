@@ -1,0 +1,26 @@
+{
+    "model_dir": null,
+    "output_dir": null,
+    "dataset_dir": null,
+    "controlnet_dir": null,
+    "validation_data_dir": null,
+
+    "resolution": 512,
+    "train_batch_size": 4,
+    "gradient_accumulation_steps": 32,
+    "num_train_epochs": 20,
+    "learning_rate": 1e-4,
+    "lr_scheduler": "constant",
+    "lr_warmup_steps": 500,
+    "lr_num_cycles": 1,
+    "lr_power": 1.0,
+    "checkpointing_steps": 500,
+    "checkpoints_total_limit": 3,
+    "validation_steps": 500,
+    "seed": 42,
+    "dataloader_num_workers": 2,
+    "max_train_samples": null,
+    "resume_from_checkpoint": null,
+    "cuda_memory_fraction": 0.85,
+    "enable_xformers": false
+}
