@@ -2,7 +2,9 @@
 import argparse
 import json
 import os
+import shutil
 import tempfile
+from pathlib import Path
 import pytest
 
 
@@ -22,6 +24,7 @@ def _make_train_args(**overrides):
         streaming_validation_samples=3,
         controlnet_dir=None,
         validation_data_dir=None,
+        validation_sample_count=3,
         resolution=512,
         train_batch_size=4,
         num_train_epochs=1,
@@ -184,6 +187,55 @@ class TestBuildTrainCommand:
         assert "--streaming_shuffle_buffer=2048" in cmd_str
         assert "--streaming_validation_samples=2" in cmd_str
         assert "--train_data_dir=" not in cmd_str
+
+
+class TestLocalValidationSamples:
+    """Tests for automatic local validation sample materialization."""
+
+    def test_materializes_three_samples_from_sibling_val_split(self):
+        from controlnet.runner import materialize_local_validation_samples
+
+        root = Path("scratch/test_runner_validation").resolve()
+        if root.exists():
+            shutil.rmtree(root)
+        try:
+            root.mkdir(parents=True)
+            train_dir = root / "train"
+            val_dir = root / "val"
+            mask_dir = val_dir / "mask"
+            output_dir = root / "output"
+            train_dir.mkdir()
+            mask_dir.mkdir(parents=True)
+
+            with (val_dir / "prompt.jsonl").open("w", encoding="utf-8") as prompt_file:
+                for index in range(5):
+                    name = f"{index:06d}.png"
+                    (mask_dir / name).write_bytes(b"mask")
+                    prompt_file.write(
+                        json.dumps({"image": name, "mask": name, "prompt": f"prompt {index}"}) + "\n"
+                    )
+
+            args = _make_train_args(
+                dataset_dir=str(train_dir),
+                output_dir=str(output_dir),
+                validation_sample_count=3,
+                seed=42,
+            )
+            materialize_local_validation_samples(args)
+
+            validation_dir = output_dir / "validation_samples"
+            prompt_rows = [
+                json.loads(line)
+                for line in (validation_dir / "prompt.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+
+            assert args.validation_data_dir == str(validation_dir)
+            assert len(prompt_rows) == 3
+            assert len(list((validation_dir / "images").iterdir())) == 3
+            assert all(row["image"].startswith("validation_") for row in prompt_rows)
+        finally:
+            if root.exists():
+                shutil.rmtree(root)
 
 
 class TestBuildInferCommand:

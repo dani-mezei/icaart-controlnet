@@ -18,8 +18,11 @@ Each optimization can be individually disabled with --no_<flag>.
 import argparse
 import json
 import os
+import random
+import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 CONTROLNET_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(CONTROLNET_DIR)
@@ -139,6 +142,8 @@ def _build_train_parser(subparsers):
                     help="Resume from a pretrained ControlNet checkpoint.")
     p.add_argument("--validation_data_dir", type=str, default=None,
                     help="Directory with images/ and prompt.jsonl for validation.")
+    p.add_argument("--validation_sample_count", type=int, default=3,
+                    help="Number of local validation split samples to use when --validation_data_dir is not set.")
     # Training hyperparameters
     p.add_argument("--resolution", type=int, default=512)
     p.add_argument("--train_batch_size", type=int, default=4)
@@ -260,6 +265,91 @@ def build_train_command(args):
     return cmd
 
 
+def _find_local_validation_split(dataset_dir):
+    train_dir = Path(dataset_dir).resolve()
+    parent_dir = train_dir.parent
+
+    for split_name in ("val", "validation"):
+        split_dir = parent_dir / split_name
+        if (split_dir / "prompt.jsonl").is_file():
+            return split_dir
+    return None
+
+
+def _first_existing_dir(base_dir, names):
+    for name in names:
+        path = base_dir / name
+        if path.is_dir():
+            return path
+    return None
+
+
+def _stage_validation_file(src, dst):
+    if dst.exists() or dst.is_symlink():
+        dst.unlink()
+    try:
+        os.symlink(src, dst)
+    except OSError:
+        shutil.copy2(src, dst)
+
+
+def materialize_local_validation_samples(args):
+    if args.streaming or args.validation_data_dir or args.validation_sample_count == 0:
+        return
+
+    validation_split_dir = _find_local_validation_split(args.dataset_dir)
+    if validation_split_dir is None:
+        print(
+            "[train] No sibling val/ or validation/ split with prompt.jsonl found; "
+            "validation generation will be skipped.",
+            flush=True,
+        )
+        return
+
+    mask_dir = _first_existing_dir(validation_split_dir, ("mask", "masks", "images"))
+    if mask_dir is None:
+        raise ValueError(
+            f"Validation split {validation_split_dir} must contain mask/, masks/, or images/."
+        )
+
+    with (validation_split_dir / "prompt.jsonl").open("r", encoding="utf-8") as prompt_file:
+        rows = [json.loads(line) for line in prompt_file if line.strip()]
+    if not rows:
+        raise ValueError(f"Validation prompt file is empty: {validation_split_dir / 'prompt.jsonl'}")
+
+    sample_count = min(args.validation_sample_count, len(rows))
+    sampled_rows = random.Random(args.seed).sample(rows, sample_count)
+
+    validation_dir = Path(args.output_dir).resolve() / "validation_samples"
+    validation_images_dir = validation_dir / "images"
+    validation_images_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt_rows = []
+    for index, row in enumerate(sampled_rows):
+        source_name = row.get("mask") or row.get("image")
+        if source_name is None:
+            raise ValueError("Validation prompt rows must include a `mask` or `image` field.")
+
+        src = mask_dir / Path(source_name).name
+        if not src.is_file():
+            raise FileNotFoundError(f"Validation conditioning image not found: {src}")
+
+        dst_name = f"validation_{index:04d}{src.suffix}"
+        _stage_validation_file(src, validation_images_dir / dst_name)
+        prompt_rows.append({"image": dst_name, "prompt": row["prompt"]})
+
+    with (validation_dir / "prompt.jsonl").open("w", encoding="utf-8") as prompt_file:
+        for row in prompt_rows:
+            prompt_file.write(json.dumps(row) + "\n")
+
+    args.validation_data_dir = str(validation_dir)
+    print(
+        f"[train] Using {sample_count} validation samples from {validation_split_dir}: "
+        f"{validation_dir}",
+        flush=True,
+    )
+
+
 def run_train(args):
     """Configure the data pipeline, then launch ControlNet training."""
     if args.streaming:
@@ -277,6 +367,7 @@ def run_train(args):
         raise ValueError("--output_dir is required for training.")
 
     env = _get_env()
+    materialize_local_validation_samples(args)
 
     # Step 1: Patch data_pipeline.py with the dataset directory for local datasets only.
     if not args.streaming:
