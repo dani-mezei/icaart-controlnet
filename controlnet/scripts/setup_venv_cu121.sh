@@ -4,7 +4,13 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 PYTHON_BIN="${PYTHON_BIN:-python3.10}"
-VENV_DIR="${VENV_DIR:-${HOME}/.venv}"
+if [[ -z "${VENV_DIR:-}" ]]; then
+    if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+        VENV_DIR="${VIRTUAL_ENV}"
+    else
+        VENV_DIR="${HOME}/.venv"
+    fi
+fi
 TORCH_VERSION="${TORCH_VERSION:-2.5.1}"
 TORCHVISION_VERSION="${TORCHVISION_VERSION:-0.20.1}"
 TORCHAUDIO_VERSION="${TORCHAUDIO_VERSION:-2.5.1}"
