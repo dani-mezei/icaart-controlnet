@@ -4,20 +4,27 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 PYTHON_BIN="${PYTHON_BIN:-python3.10}"
-VENV_DIR="${VENV_DIR:-${PROJECT_ROOT}/.venv-controlnet}"
+VENV_DIR="${VENV_DIR:-${HOME}/.venv}"
 TORCH_VERSION="${TORCH_VERSION:-2.5.1}"
 TORCHVISION_VERSION="${TORCHVISION_VERSION:-0.20.1}"
 TORCHAUDIO_VERSION="${TORCHAUDIO_VERSION:-2.5.1}"
 TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu121}"
 INSTALL_EXTRAS="${INSTALL_EXTRAS:-dev,bnb}"
+VENV_PYTHON="${VENV_DIR}/bin/python"
 
-if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
+if [[ -x "${VENV_PYTHON}" ]]; then
+    SETUP_PYTHON="${VENV_PYTHON}"
+else
+    SETUP_PYTHON="${PYTHON_BIN}"
+fi
+
+if [[ "${SETUP_PYTHON}" == "${PYTHON_BIN}" ]] && ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
     echo "Python executable '${PYTHON_BIN}' was not found." >&2
     echo "Set PYTHON_BIN to python3.10 or python3.11 and rerun." >&2
     exit 1
 fi
 
-"${PYTHON_BIN}" - <<'PY'
+"${SETUP_PYTHON}" - <<'PY'
 import sys
 
 version = sys.version_info
@@ -31,16 +38,20 @@ PY
 if command -v uv >/dev/null 2>&1; then
     UV_CMD=(uv)
 else
-    echo "uv was not found; installing uv into the current user environment."
-    "${PYTHON_BIN}" -m pip install --user "uv>=0.4"
-    UV_CMD=("${PYTHON_BIN}" -m uv)
+    echo "uv was not found; installing uv with ${SETUP_PYTHON}."
+    "${SETUP_PYTHON}" -m pip install --upgrade "uv>=0.4"
+    UV_CMD=("${SETUP_PYTHON}" -m uv)
 fi
 
 echo "Project root: ${PROJECT_ROOT}"
 echo "Virtual environment: ${VENV_DIR}"
 echo "PyTorch CUDA wheel index: ${TORCH_INDEX_URL}"
 
-"${UV_CMD[@]}" venv "${VENV_DIR}" --python "${PYTHON_BIN}"
+if [[ -x "${VENV_PYTHON}" ]]; then
+    echo "Using existing virtual environment at ${VENV_DIR}"
+else
+    "${UV_CMD[@]}" venv "${VENV_DIR}" --python "${PYTHON_BIN}"
+fi
 
 # shellcheck disable=SC1091
 source "${VENV_DIR}/bin/activate"

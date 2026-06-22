@@ -12,7 +12,7 @@ Set up the Linux CUDA environment before downloading models or starting training
 
 ```bash
 bash controlnet/scripts/setup_venv_cu121.sh
-source .venv-controlnet/bin/activate
+source "$HOME/.venv/bin/activate"
 ```
 
 See `controlnet/ENV_SETUP.md` for scratch-storage cache locations, JupyterHub setup, CUDA wheel details, and verification commands.

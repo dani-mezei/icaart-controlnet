@@ -10,7 +10,7 @@ Run from the repository root on the remote Linux machine:
 
 ```bash
 bash controlnet/scripts/setup_venv_cu121.sh
-source .venv-controlnet/bin/activate
+source "$HOME/.venv/bin/activate"
 python -m controlnet --help
 ```
 
