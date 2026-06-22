@@ -887,8 +887,6 @@ def make_train_dataset(args, tokenizer, accelerator):
 
         image_transforms = transforms.Compose(
             [
-                transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-                # transforms.CenterCrop(args.resolution),
                 transforms.Lambda(selected_weather_transform) if selected_weather_transform 
                 else no_condition_applied,
                 transforms.ToTensor(),
@@ -898,8 +896,6 @@ def make_train_dataset(args, tokenizer, accelerator):
 
         conditioning_image_transforms = transforms.Compose(
             [
-                transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-                # transforms.CenterCrop(args.resolution),
                 transforms.ToTensor(),
             ]
         )
