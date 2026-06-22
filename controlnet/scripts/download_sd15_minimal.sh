@@ -54,15 +54,44 @@ huggingface-cli download "$MODEL_ID" \
   --revision "$HF_REVISION" \
   --local-dir "$SD15_DIR" \
   --local-dir-use-symlinks False \
-  --include "model_index.json" \
-  --include "scheduler/*" \
-  --include "tokenizer/*" \
-  --include "text_encoder/config.json" \
-  --include "text_encoder/model.safetensors" \
-  --include "unet/config.json" \
-  --include "unet/diffusion_pytorch_model.safetensors" \
-  --include "vae/config.json" \
-  --include "vae/diffusion_pytorch_model.safetensors"
+  --include \
+    "model_index.json" \
+    "scheduler/*" \
+    "tokenizer/*" \
+    "text_encoder/config.json" \
+    "text_encoder/model.safetensors" \
+    "unet/config.json" \
+    "unet/diffusion_pytorch_model.safetensors" \
+    "vae/config.json" \
+    "vae/diffusion_pytorch_model.safetensors"
+
+required_files=(
+  "model_index.json"
+  "scheduler/scheduler_config.json"
+  "tokenizer/merges.txt"
+  "tokenizer/special_tokens_map.json"
+  "tokenizer/tokenizer_config.json"
+  "tokenizer/vocab.json"
+  "text_encoder/config.json"
+  "text_encoder/model.safetensors"
+  "unet/config.json"
+  "unet/diffusion_pytorch_model.safetensors"
+  "vae/config.json"
+  "vae/diffusion_pytorch_model.safetensors"
+)
+
+missing_files=()
+for file_path in "${required_files[@]}"; do
+  if [[ ! -f "$SD15_DIR/$file_path" ]]; then
+    missing_files+=("$file_path")
+  fi
+done
+
+if (( ${#missing_files[@]} > 0 )); then
+  echo "Stable Diffusion v1.5 download is incomplete. Missing files:" >&2
+  printf '  %s\n' "${missing_files[@]}" >&2
+  exit 1
+fi
 
 echo
 echo "Stable Diffusion v1.5 files downloaded."
