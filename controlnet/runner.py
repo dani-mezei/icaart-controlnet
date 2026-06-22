@@ -414,7 +414,7 @@ def _get_env():
     env = os.environ.copy()
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = PROJECT_ROOT + (os.pathsep + existing if existing else "")
-    env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True,max_split_size_mb:128")
+    env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "max_split_size_mb:128")
     return env
 
 
