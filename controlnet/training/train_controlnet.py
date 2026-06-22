@@ -716,16 +716,20 @@ def configure_cuda_memory(args):
         raise ValueError("`--cuda_memory_fraction` must be in the range (0, 1].")
 
     if not torch.cuda.is_available():
-        logger.warning("Ignoring --cuda_memory_fraction because CUDA is not available.")
+        print(
+            "Ignoring --cuda_memory_fraction because CUDA is not available.",
+            flush=True,
+        )
         return
 
     torch.cuda.set_per_process_memory_fraction(args.cuda_memory_fraction)
     total_gib = torch.cuda.get_device_properties(0).total_memory / 1024**3
-    logger.info(
-        "CUDA memory cap set to %.2f of device 0 (%.1f GiB usable out of %.1f GiB total).",
-        args.cuda_memory_fraction,
-        total_gib * args.cuda_memory_fraction,
-        total_gib,
+    print(
+        "CUDA memory cap set to "
+        f"{args.cuda_memory_fraction:.2f} of device 0 "
+        f"({total_gib * args.cuda_memory_fraction:.1f} GiB usable "
+        f"out of {total_gib:.1f} GiB total).",
+        flush=True,
     )
 
 
