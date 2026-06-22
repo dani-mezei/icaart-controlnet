@@ -71,6 +71,11 @@ def parse_args(input_args=None):
                         default="",
                         help="String to be added to the end of each generated prompt."
                         )
+    parser.add_argument("--resume",
+                        action="store_true",
+                        help=("Skip images already present in output prompt.jsonl. "
+                              "Useful when resuming an interrupted captioning run.")
+                        )
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -102,9 +107,9 @@ def save_changed_prompts(changed_prompts, output_dir):
     output_file_path = os.path.join(output_dir, OUTPUT_FILE)
     # Update the current prompts with the new prompts
     with open(output_file_path, "r") as f:
-        data = f.readlines()
-        for i, line in enumerate(data):
-            image_name = json.loads(line)["image"]
+        data = [json.loads(line) for line in f if line.strip()]
+        for i, item in enumerate(data):
+            image_name = item["image"]
             if image_name in changed_prompts:
                 data[i] = {
                     "mask": image_name,
@@ -114,8 +119,8 @@ def save_changed_prompts(changed_prompts, output_dir):
 
     # Save the updated prompts to the jsonl file
     with open(output_file_path, "w") as f:
-        for line in data:
-            f.write(json.dumps(line) + "\n")
+        for item in data:
+            f.write(json.dumps(item) + "\n")
 
 
 def save_prompts(image_names, prompts, output_dir):
@@ -128,6 +133,43 @@ def save_prompts(image_names, prompts, output_dir):
                 "prompt": prompt
             }
             f.write(json.dumps(data) + "\n")
+
+
+def append_prompts(image_names, prompts, output_dir):
+    with open(os.path.join(output_dir, OUTPUT_FILE), "a") as f:
+        for image_name, prompt in zip(image_names, prompts):
+            data = {
+                "mask": image_name,
+                "image": image_name,
+                "prompt": prompt
+            }
+            f.write(json.dumps(data) + "\n")
+        f.flush()
+
+
+def load_existing_image_names(output_dir):
+    output_file_path = os.path.join(output_dir, OUTPUT_FILE)
+    if not os.path.exists(output_file_path):
+        return set()
+
+    image_names = set()
+    with open(output_file_path, "r") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            image_names.add(json.loads(line)["image"])
+    return image_names
+
+
+def dedupe_preserve_order(image_names):
+    unique_image_names = []
+    seen = set()
+    for image_name in image_names:
+        if image_name in seen:
+            continue
+        unique_image_names.append(image_name)
+        seen.add(image_name)
+    return unique_image_names
 
 
 def load_image_names(image_paths):
@@ -190,6 +232,7 @@ def main(args=None):
     blip2 = Blip2CaptionsExtractor(args.blip2_dir, device=device)
 
     generated_prompts = []
+    generated_image_names = []
 
     if args.csv_to_image_paths is None:
         image_names = os.listdir(args.input_dir)
@@ -198,30 +241,57 @@ def main(args=None):
         image_names = load_image_names(args.csv_to_image_paths)
 
     # Remove duplicates
-    image_names = list(set(image_names))
+    image_names = dedupe_preserve_order(image_names)
+
+    output_file_path = os.path.join(args.output_dir, OUTPUT_FILE)
+    if args.resume:
+        existing_image_names = load_existing_image_names(args.output_dir)
+        image_names = [
+            image_name for image_name in image_names
+            if image_name not in existing_image_names
+        ]
+        print(
+            f"[captioning] Resuming from {output_file_path}; "
+            f"skipping {len(existing_image_names)} existing prompts.",
+            flush=True,
+        )
+    else:
+        open(output_file_path, "w").close()
+
+    total_images = len(image_names)
+    print(
+        f"[captioning] Starting BLIP2 caption generation for {total_images} images.",
+        flush=True,
+    )
 
     # Process the images in batches
     for i in range(0, len(image_names), args.step_size):
         slice_end = min(i + args.step_size, len(image_names))
+        batch_image_names = image_names[i:slice_end]
 
         image_paths = [os.path.join(args.input_dir, image_name)
-                       for image_name in image_names[i:slice_end]]
+                       for image_name in batch_image_names]
         # Extract prompts for the images
         prompts = blip2.extract(
             image_paths, max_new_tokens=args.max_new_tokens, prompt=args.question)
+        prompts = [prompt + args.prompt_suffix for prompt in prompts]
+        append_prompts(batch_image_names, prompts, args.output_dir)
+
+        generated_image_names.extend(batch_image_names)
         generated_prompts.extend(prompts)
 
-    # Add the prompt suffix to the generated prompts
-    generated_prompts = [
-        prompt + args.prompt_suffix for prompt in generated_prompts]
+        print(
+            f"[captioning] {slice_end}/{total_images} images processed; "
+            f"wrote {output_file_path}",
+            flush=True,
+        )
 
-    # Save the prompts
-    save_prompts(image_names, generated_prompts, args.output_dir)
+    print("[captioning] Caption generation complete.", flush=True)
 
     # Display the image and prompt if the prompt editor is enabled
     if args.prompt_editor:
         changed_prompts = {}
-        for image_name, prompt in zip(image_names, generated_prompts):
+        for image_name, prompt in zip(generated_image_names, generated_prompts):
             image_path = os.path.join(args.input_dir, image_name)
             image = cv2.imread(image_path)
             new_prompt = show_window(image, prompt)
