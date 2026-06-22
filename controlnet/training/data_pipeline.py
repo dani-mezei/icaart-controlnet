@@ -93,11 +93,9 @@ class CustomDataset(datasets.GeneratorBasedBuilder):
         """
 
         metadata = pd.read_json(metadata_path, lines=True)
-        default_labels = ["high quality", "extremely detailed", "4K", "HQ"]
 
         for _, row in metadata.iterrows():
             prompt = row["prompt"]
-            prompt = ", ".join([prompt, *default_labels])
 
             try:
                 image_path = row["image"]
