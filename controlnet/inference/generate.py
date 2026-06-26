@@ -436,7 +436,7 @@ def main(args):
             args.stable_diffusion_dir, controlnet=controlnet, vae=vae, torch_dtype=data_type).to(DEVICE)
     else:
         pipeline = StableDiffusionControlNetPipeline.from_pretrained(
-            args.stable_diffusion_dir, controlnet=controlnet, torch_dtype=data_type, safety_checker=None).to(DEVICE)
+            args.stable_diffusion_dir, controlnet=controlnet, torch_dtype=data_type, safety_checker=None, feature_extractor=None, requires_safety_checker=False,).to(DEVICE)
     
     pipeline.scheduler = UniPCMultistepScheduler.from_config(pipeline.scheduler.config)
     if args.enable_xformers:

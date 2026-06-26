@@ -319,9 +319,11 @@ def materialize_local_validation_samples(args):
 
     sample_count = min(args.validation_sample_count, len(rows))
     sampled_rows = random.Random(args.seed).sample(rows, sample_count)
-
+    
     validation_dir = Path(args.output_dir).resolve() / "validation_samples"
     validation_images_dir = validation_dir / "images"
+    if validation_images_dir.exists():
+        shutil.rmtree(validation_images_dir)
     validation_images_dir.mkdir(parents=True, exist_ok=True)
 
     prompt_rows = []
@@ -409,7 +411,7 @@ def _build_infer_parser(subparsers):
     p.add_argument("--output_dir", type=str, default="./output")
     p.add_argument("--height", type=int, default=512)
     p.add_argument("--width", type=int, default=512)
-    p.add_argument("--num_inference_steps", type=int, default=20)
+    p.add_argument("--num_inference_steps", type=int, default=30)
     p.add_argument("--num_images_per_prompt", type=int, default=1)
     p.add_argument("--batch_size", type=int, default=1)
     p.add_argument("--dtype", type=str, default="auto", choices=["auto", "fp32", "fp16", "bf16"])

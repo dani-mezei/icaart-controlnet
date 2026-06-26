@@ -98,6 +98,8 @@ def log_validation(
         unet=unet,
         controlnet=controlnet,
         safety_checker=None,
+        feature_extractor=None,
+        requires_safety_checker=False,
         revision=args.revision,
         variant=args.variant,
         torch_dtype=weight_dtype,
