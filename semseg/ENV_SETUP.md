@@ -101,7 +101,7 @@ python -m semseg.preprocess.relabel \
     --output_dir /path/to/controlnet_dataset/val/label_19
 ```
 
-For one A100 40 GB GPU, start with the provided config. It keeps the effective batch size at `128` via gradient accumulation while lowering peak VRAM:
+For one A100 40 GB GPU, start with the provided config. It runs for `25` epochs, extending the paper's `20`-epoch reference slightly, and keeps the effective batch size at `128` via gradient accumulation while lowering peak VRAM:
 
 ```bash
 python -m semseg.main \

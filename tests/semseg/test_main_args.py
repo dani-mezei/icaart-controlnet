@@ -69,7 +69,7 @@ def test_json_config_combines_with_cli_path_overrides(monkeypatch):
                     "real_ratio": 0.75,
                     "height": 376,
                     "width": 1408,
-                    "num_train_epochs": 20,
+                    "num_train_epochs": 25,
                     "gradient_accumulation_steps": 32,
                 }
             ),
