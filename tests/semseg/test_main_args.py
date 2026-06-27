@@ -63,14 +63,14 @@ def test_json_config_combines_with_cli_path_overrides(monkeypatch):
             json.dumps(
                 {
                     "learning_rate": 0.0001,
-                    "batch_size": 8,
+                    "batch_size": 4,
                     "use_synthetic_images": True,
                     "mixed_batch": True,
                     "real_ratio": 0.75,
                     "height": 376,
                     "width": 1408,
                     "num_train_epochs": 20,
-                    "gradient_accumulation_steps": 16,
+                    "gradient_accumulation_steps": 32,
                 }
             ),
             encoding="utf-8",
@@ -98,8 +98,8 @@ def test_json_config_combines_with_cli_path_overrides(monkeypatch):
             ]
         )
 
-        assert args.batch_size == 8
-        assert args.gradient_accumulation_steps == 16
+        assert args.batch_size == 4
+        assert args.gradient_accumulation_steps == 32
         assert args.real_ratio == 0.75
         assert args.output_dir == str(output_dir)
         assert output_dir.is_dir()

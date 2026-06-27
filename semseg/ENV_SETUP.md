@@ -115,7 +115,7 @@ python -m semseg.main \
     --output_dir /path/to/output/deeplab-resnet101-25pct-synth
 ```
 
-This config uses `batch_size=8` and `gradient_accumulation_steps=16`, so the effective batch size is `8 * 16 = 128`. It also uses `mixed_batch` with `real_ratio=0.75`, giving each batch 75% real and 25% synthetic samples.
+This config uses `batch_size=4` and `gradient_accumulation_steps=32`, so the effective batch size is `4 * 32 = 128`. It also uses `mixed_batch` with `real_ratio=0.75`, giving each physical batch 3 real and 1 synthetic sample.
 
 Validation runs every `1000` training batches by default to reduce validation overhead on full A100 runs. Override `--validation_steps` for smoke tests or denser validation curves.
 
