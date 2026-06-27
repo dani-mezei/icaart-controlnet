@@ -171,7 +171,6 @@ class MixedDataModule(LightningDataModule):
                     self.combined_train_dataset,
                     batch_sampler=batch_sampler,
                     num_workers=3,
-                    drop_last=True,
                     persistent_workers=True,
                     worker_init_fn=seed_worker,
                     generator=torch.Generator().manual_seed(42),
