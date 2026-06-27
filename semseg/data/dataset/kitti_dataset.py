@@ -7,6 +7,17 @@ import torch
 from torch.utils.data import Dataset
 
 
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+
+
+def _list_image_files(directory):
+    return sorted(
+        filename
+        for filename in os.listdir(directory)
+        if os.path.splitext(filename)[1].lower() in IMAGE_EXTENSIONS
+    )
+
+
 class KittiDataset(Dataset):
     def __init__(
         self,
@@ -24,8 +35,8 @@ class KittiDataset(Dataset):
 
         self.samples = []
 
-        image_filenames = sorted(os.listdir(image_dir))
-        label_filenames = sorted(os.listdir(label_dir))
+        image_filenames = _list_image_files(image_dir)
+        label_filenames = _list_image_files(label_dir)
 
         for img, lbl in zip(image_filenames, label_filenames):
             label_path = os.path.join(label_dir, lbl)
@@ -35,8 +46,8 @@ class KittiDataset(Dataset):
 
         if additional_image_dirs and additional_label_dirs:
             for img_dir, lbl_dir in zip(additional_image_dirs, additional_label_dirs):
-                imgs = sorted(os.listdir(img_dir))
-                lbls = sorted(os.listdir(lbl_dir))
+                imgs = _list_image_files(img_dir)
+                lbls = _list_image_files(lbl_dir)
                 for img, lbl in zip(imgs, lbls):
                     lbl_path = os.path.join(lbl_dir, lbl)
                     img_path = os.path.join(img_dir, img)
@@ -45,8 +56,8 @@ class KittiDataset(Dataset):
 
         if negative_image_dirs and negative_label_dirs:
             for neg_img_dir, neg_lbl_dir in zip(negative_image_dirs, negative_label_dirs):
-                neg_imgs = sorted(os.listdir(neg_img_dir))
-                neg_lbls = sorted(os.listdir(neg_lbl_dir))
+                neg_imgs = _list_image_files(neg_img_dir)
+                neg_lbls = _list_image_files(neg_lbl_dir)
                 print(f"Length before removal: {len(self.samples)}")
                 
                 current_img_names = {os.path.basename(img_path) for img_path, _ in self.samples}
@@ -80,8 +91,12 @@ class KittiDataset(Dataset):
         image_path, label_path = self.samples[index]
 
         image = cv2.imread(image_path)
+        if image is None:
+            raise FileNotFoundError(f"Failed to read image: {image_path}")
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         label = cv2.imread(label_path, cv2.IMREAD_GRAYSCALE)
+        if label is None:
+            raise FileNotFoundError(f"Failed to read label: {label_path}")
 
         if self.image_transform:
             image = self.image_transform(image)
