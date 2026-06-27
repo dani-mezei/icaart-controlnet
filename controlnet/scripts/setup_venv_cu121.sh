@@ -42,6 +42,11 @@ if not ((3, 10) <= (version.major, version.minor) < (3, 12)):
 PY
 
 UV_BIN="$(command -v uv || true)"
+if [[ -n "${UV_BIN}" ]] && [[ ! -x "${UV_BIN}" ]] && [[ -f "${UV_BIN}" ]]; then
+    echo "uv exists at ${UV_BIN} but is not executable; attempting chmod u+x."
+    chmod u+x "${UV_BIN}" 2>/dev/null || true
+fi
+
 if [[ -n "${UV_BIN}" ]] && "${UV_BIN}" --version >/dev/null 2>&1; then
     UV_CMD=("${UV_BIN}")
 else
