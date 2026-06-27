@@ -16,14 +16,22 @@ See `semseg/ENV_SETUP.md` for A100 setup notes, scratch-cache guidance, verifica
 
 ## Paper-Style A100 Training
 
+Convert raw KITTI-360 semantic IDs to DeepLab train IDs before training:
+
+```bash
+python -m semseg.preprocess.relabel \
+    --input_dir /path/to/controlnet_dataset/train/mask_semseg \
+    --output_dir /path/to/controlnet_dataset/train/label_19
+```
+
 ```bash
 python -m semseg.main \
     --load_json semseg/configs/resnet101_25pct_synthetic_a100_40gb.json \
     --train_image_dir /path/to/real/train/images \
-    --train_label_dir /path/to/real/train/labels_19 \
+    --train_label_dir /path/to/real/train/label_19 \
     --synthetic_image_dir /path/to/synthetic/train/images \
-    --synthetic_label_dir /path/to/synthetic/train/labels_19 \
+    --synthetic_label_dir /path/to/synthetic/train/label_19 \
     --val_image_dir /path/to/val/images \
-    --val_label_dir /path/to/val/labels_19 \
+    --val_label_dir /path/to/val/label_19 \
     --output_dir /path/to/output/deeplab-resnet101-25pct-synth
 ```

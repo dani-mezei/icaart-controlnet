@@ -89,17 +89,29 @@ python -m semseg.main --help
 
 The paper uses DeepLabV3 with a ResNet-101 backbone, ImageNet-pretrained torchvision weights, Adam with learning rate `1e-4`, cross-entropy loss with ignore index `255`, input resolution `1408x376`, batch size `128`, and `20` epochs.
 
+DeepLab labels must be single-channel 19-class trainId PNGs with values `0..18` and `255` for ignored pixels. If your dataset has KITTI-360 raw semantic IDs in `mask_semseg`, relabel them first:
+
+```bash
+python -m semseg.preprocess.relabel \
+    --input_dir /path/to/controlnet_dataset/train/mask_semseg \
+    --output_dir /path/to/controlnet_dataset/train/label_19
+
+python -m semseg.preprocess.relabel \
+    --input_dir /path/to/controlnet_dataset/val/mask_semseg \
+    --output_dir /path/to/controlnet_dataset/val/label_19
+```
+
 For one A100 40 GB GPU, start with the provided config. It keeps the effective batch size at `128` via gradient accumulation while lowering peak VRAM:
 
 ```bash
 python -m semseg.main \
     --load_json semseg/configs/resnet101_25pct_synthetic_a100_40gb.json \
     --train_image_dir /path/to/real/train/images \
-    --train_label_dir /path/to/real/train/labels_19 \
+    --train_label_dir /path/to/real/train/label_19 \
     --synthetic_image_dir /path/to/synthetic/train/images \
-    --synthetic_label_dir /path/to/synthetic/train/labels_19 \
+    --synthetic_label_dir /path/to/synthetic/train/label_19 \
     --val_image_dir /path/to/val/images \
-    --val_label_dir /path/to/val/labels_19 \
+    --val_label_dir /path/to/val/label_19 \
     --output_dir /path/to/output/deeplab-resnet101-25pct-synth
 ```
 
