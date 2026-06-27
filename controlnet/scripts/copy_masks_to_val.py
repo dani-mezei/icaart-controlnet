@@ -8,7 +8,7 @@ from pathlib import Path
 TRAIN_DIR = Path(r"C:\path\to\train")
 VAL_DIR = Path(r"C:\path\to\val")
 
-# Randomly copy this many masks from train/mask into val/mask.
+# Randomly copy this many masks from train/mask into val/images.
 NUM_MASKS = 5
 
 # Set to an integer for repeatable random picks, or None for different picks each run.
@@ -39,18 +39,18 @@ def list_masks(path):
 
 def main():
     train_mask_dir = TRAIN_DIR / "mask"
-    val_mask_dir = VAL_DIR / "mask"
+    val_images_dir = VAL_DIR / "images"
     train_prompt_path = TRAIN_DIR / "prompt.jsonl"
     val_prompt_path = VAL_DIR / "prompt.jsonl"
 
     if not train_mask_dir.exists():
         raise FileNotFoundError(f"Missing train mask directory: {train_mask_dir}")
 
-    val_mask_dir.mkdir(parents=True, exist_ok=True)
+    val_images_dir.mkdir(parents=True, exist_ok=True)
 
     train_prompts = read_jsonl(train_prompt_path)
     val_prompts = read_jsonl(val_prompt_path)
-    val_by_mask = {row.get("mask", row.get("image")): row for row in val_prompts}
+    val_by_image = {row["image"]: row for row in val_prompts if "image" in row}
 
     masks = list_masks(train_mask_dir)
     if len(masks) < NUM_MASKS:
@@ -69,16 +69,14 @@ def main():
         if not matching_rows:
             raise ValueError(f"No prompt.jsonl row found for mask: {name}")
 
-        shutil.copy2(source_mask, val_mask_dir / name)
+        shutil.copy2(source_mask, val_images_dir / name)
 
-        prompt_row = dict(matching_rows[0])
-        if "mask" in prompt_row:
-            prompt_row["mask"] = name
-        else:
-            prompt_row["image"] = name
-        val_by_mask[name] = prompt_row
+        val_by_image[name] = {
+            "image": name,
+            "prompt": matching_rows[0]["prompt"],
+        }
 
-    write_jsonl(val_prompt_path, val_by_mask.values())
+    write_jsonl(val_prompt_path, val_by_image.values())
     print(f"Copied {len(selected_masks)} masks and updated {val_prompt_path}")
     print("Selected masks:")
     for mask in selected_masks:
