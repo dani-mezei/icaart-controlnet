@@ -45,9 +45,8 @@ UV_BIN="$(command -v uv || true)"
 if [[ -n "${UV_BIN}" ]] && "${UV_BIN}" --version >/dev/null 2>&1; then
     UV_CMD=("${UV_BIN}")
 else
-    echo "uv was not found or is not executable; installing uv with ${SETUP_PYTHON}."
-    "${SETUP_PYTHON}" -m pip install --upgrade "uv>=0.4"
-    UV_CMD=("${SETUP_PYTHON}" -m uv)
+    echo "uv was not found or is not executable; falling back to pip."
+    UV_CMD=()
 fi
 
 echo "Project root: ${PROJECT_ROOT}"
@@ -56,27 +55,41 @@ echo "PyTorch CUDA wheel index: ${TORCH_INDEX_URL}"
 
 if [[ -x "${VENV_PYTHON}" ]]; then
     echo "Using existing virtual environment at ${VENV_DIR}"
-else
+elif [[ ${#UV_CMD[@]} -gt 0 ]]; then
     "${UV_CMD[@]}" venv "${VENV_DIR}" --python "${PYTHON_BIN}"
+else
+    "${PYTHON_BIN}" -m venv "${VENV_DIR}"
 fi
 
 # shellcheck disable=SC1091
 source "${VENV_DIR}/bin/activate"
 
-"${UV_CMD[@]}" pip install \
-    --python "${VENV_DIR}/bin/python" \
-    --upgrade pip setuptools wheel
+if [[ ${#UV_CMD[@]} -gt 0 ]]; then
+    "${UV_CMD[@]}" pip install \
+        --python "${VENV_DIR}/bin/python" \
+        --upgrade pip setuptools wheel
 
-"${UV_CMD[@]}" pip install \
-    --python "${VENV_DIR}/bin/python" \
-    --index-url "${TORCH_INDEX_URL}" \
-    "torch==${TORCH_VERSION}" \
-    "torchvision==${TORCHVISION_VERSION}" \
-    "torchaudio==${TORCHAUDIO_VERSION}"
+    "${UV_CMD[@]}" pip install \
+        --python "${VENV_DIR}/bin/python" \
+        --index-url "${TORCH_INDEX_URL}" \
+        "torch==${TORCH_VERSION}" \
+        "torchvision==${TORCHVISION_VERSION}" \
+        "torchaudio==${TORCHAUDIO_VERSION}"
 
-"${UV_CMD[@]}" pip install \
-    --python "${VENV_DIR}/bin/python" \
-    -e "${PROJECT_ROOT}[${INSTALL_EXTRAS}]"
+    "${UV_CMD[@]}" pip install \
+        --python "${VENV_DIR}/bin/python" \
+        -e "${PROJECT_ROOT}[${INSTALL_EXTRAS}]"
+else
+    "${VENV_DIR}/bin/python" -m pip install --upgrade pip setuptools wheel
+
+    "${VENV_DIR}/bin/python" -m pip install \
+        --index-url "${TORCH_INDEX_URL}" \
+        "torch==${TORCH_VERSION}" \
+        "torchvision==${TORCHVISION_VERSION}" \
+        "torchaudio==${TORCHAUDIO_VERSION}"
+
+    "${VENV_DIR}/bin/python" -m pip install -e "${PROJECT_ROOT}[${INSTALL_EXTRAS}]"
+fi
 
 python - <<'PY'
 import importlib
