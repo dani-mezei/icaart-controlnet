@@ -1,5 +1,6 @@
 import os
 import random
+import warnings
 
 import cv2
 import numpy as np
@@ -88,15 +89,25 @@ class KittiDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, index):
-        image_path, label_path = self.samples[index]
+        for offset in range(len(self.samples)):
+            sample_index = (index + offset) % len(self.samples)
+            sample = self._load_sample(sample_index)
+            if sample is not None:
+                return sample
 
+        raise RuntimeError("No readable image/label pairs found in dataset.")
+
+    def _load_sample(self, index):
+        image_path, label_path = self.samples[index]
         image = cv2.imread(image_path)
         if image is None:
-            raise FileNotFoundError(f"Failed to read image: {image_path}")
+            warnings.warn(f"Skipping unreadable image: {image_path}", RuntimeWarning)
+            return None
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         label = cv2.imread(label_path, cv2.IMREAD_GRAYSCALE)
         if label is None:
-            raise FileNotFoundError(f"Failed to read label: {label_path}")
+            warnings.warn(f"Skipping unreadable label: {label_path}", RuntimeWarning)
+            return None
 
         if self.image_transform:
             image = self.image_transform(image)
