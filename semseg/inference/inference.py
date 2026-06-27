@@ -4,8 +4,8 @@ import torch
 from PIL import Image
 from torchvision import transforms
 
-from labels import labels
-from model import DeeplabV3Resnet101
+from semseg.labels import labels
+from semseg.model import DeeplabV3Resnet101
 
 # Load the fine-tuned model checkpoint
 checkpoint_path = "C:/Users/MED7CLJ/OneDrive - Bosch Group/UBB_thesis/thesis/test_weights/step-checkpoint-epoch=03-step=003000.ckpt"

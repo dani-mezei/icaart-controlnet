@@ -5,10 +5,10 @@ import torch
 from torch.utils.data import DataLoader, DistributedSampler, SequentialSampler
 from torchvision import transforms
 
-from data.dataset.combined_dataset import CombinedDataset
-from data.dataset.kitti_dataset import KittiDataset
-from data.sampler import MixedBatchSampler
-from utils import seed_worker
+from semseg.data.dataset.combined_dataset import CombinedDataset
+from semseg.data.dataset.kitti_dataset import KittiDataset
+from semseg.data.sampler import MixedBatchSampler
+from semseg.utils import seed_worker
 
 
 class Resize:

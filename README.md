@@ -58,23 +58,47 @@ pip install torchmetrics pandas opencv-python pillow
 
 ### 1. Semantic Segmentation
 
+Set up the shared CUDA environment first:
+
+```bash
+bash controlnet/scripts/setup_venv_cu121.sh
+source "${VIRTUAL_ENV:-$HOME/.venv}/bin/activate"
+python -m semseg.main --help
+```
+
+See `semseg/ENV_SETUP.md` for the DeepLab A100 setup guide and the paper-style ResNet-101 25% synthetic experiment command.
+
 #### Training
 
 ```bash
-cd semseg
-python main.py \
+python -m semseg.main \
     --train_image_dir /path/to/train/images \
     --train_label_dir /path/to/train/labels \
     --val_image_dir /path/to/val/images \
     --val_label_dir /path/to/val/labels \
+    --output_dir /path/to/output \
     --batch_size 8 \
-    --num_epochs 50 \
-    --lr_rate 1e-4
+    --num_train_epochs 50 \
+    --learning_rate 1e-4
 ```
 
 Or use JSON configuration:
 ```bash
-python main.py --load_json config.json
+python -m semseg.main --load_json config.json
+```
+
+Paper-style A100 40 GB run with 25% synthetic data:
+
+```bash
+python -m semseg.main \
+    --load_json semseg/configs/resnet101_25pct_synthetic_a100_40gb.json \
+    --train_image_dir /path/to/real/train/images \
+    --train_label_dir /path/to/real/train/labels_19 \
+    --synthetic_image_dir /path/to/synthetic/train/images \
+    --synthetic_label_dir /path/to/synthetic/train/labels_19 \
+    --val_image_dir /path/to/val/images \
+    --val_label_dir /path/to/val/labels_19 \
+    --output_dir /path/to/output/deeplab-resnet101-25pct-synth
 ```
 
 #### Inference

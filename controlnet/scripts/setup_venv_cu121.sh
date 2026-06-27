@@ -15,7 +15,7 @@ TORCH_VERSION="${TORCH_VERSION:-2.5.1}"
 TORCHVISION_VERSION="${TORCHVISION_VERSION:-0.20.1}"
 TORCHAUDIO_VERSION="${TORCHAUDIO_VERSION:-2.5.1}"
 TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu121}"
-INSTALL_EXTRAS="${INSTALL_EXTRAS:-dev,bnb}"
+INSTALL_EXTRAS="${INSTALL_EXTRAS:-dev,bnb,semseg}"
 VENV_PYTHON="${VENV_DIR}/bin/python"
 
 if [[ -x "${VENV_PYTHON}" ]]; then
@@ -83,7 +83,17 @@ import sys
 
 import torch
 
-packages = ["diffusers", "accelerate", "transformers", "datasets", "huggingface_hub"]
+packages = [
+    "torchvision",
+    "diffusers",
+    "accelerate",
+    "transformers",
+    "datasets",
+    "huggingface_hub",
+    "pytorch_lightning",
+    "torchmetrics",
+    "cv2",
+]
 
 print(f"Python: {sys.version.split()[0]}")
 print(f"Torch: {torch.__version__}")
@@ -114,4 +124,7 @@ Activate it with:
 Run the ControlNet CLI with:
   python -m controlnet --help
   icaart-controlnet --help
+
+Run the DeepLab training entrypoint with:
+  python -m semseg.main --help
 EOF

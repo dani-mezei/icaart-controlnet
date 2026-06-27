@@ -26,6 +26,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+semseg = [
+    "pytorch-lightning>=2.3,<3",
+    "torchmetrics>=1.4,<2",
+]
 bnb = [
     "bitsandbytes>=0.43.3,<1",
 ]
@@ -40,8 +44,11 @@ wandb = [
 icaart-controlnet = "controlnet.runner:main"
 
 [tool.setuptools.packages.find]
-include = ["controlnet*"]
+include = ["controlnet*", "semseg*"]
+
+[tool.setuptools.package-data]
+semseg = ["configs/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-testpaths = ["tests/controlnet"]
+testpaths = ["tests/controlnet", "tests/semseg"]

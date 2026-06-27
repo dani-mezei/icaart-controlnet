@@ -1,4 +1,5 @@
 *.json
+!configs/*.json
 *.png
 *.jpg
 *.jpeg

@@ -17,5 +17,7 @@ huggingface/
 
 # Local datasets and generated scratch artifacts
 data/
+!semseg/data/
+!semseg/data/__init__.py
 scratch/
 patch_utf8.txt

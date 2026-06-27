@@ -19,6 +19,7 @@ The script installs:
 - `torch==2.5.1`, `torchvision==0.20.1`, and `torchaudio==2.5.1` from the PyTorch CUDA 12.1 wheel index
 - the local repo in editable mode
 - ControlNet dependencies including Diffusers, Accelerate, Transformers, Datasets, OpenCV, TensorBoard, and BitsAndBytes
+- DeepLab dependencies including PyTorch Lightning and TorchMetrics
 
 ## Storage-Constrained Servers
 
@@ -64,13 +65,13 @@ This avoids accidentally installing a CPU-only wheel from PyPI.
 
 ## Optional Packages
 
-The default script installs the `dev` and `bnb` extras:
+The default script installs the `dev`, `bnb`, and `semseg` extras:
 
 ```bash
-uv pip install -e ".[dev,bnb]"
+uv pip install -e ".[dev,bnb,semseg]"
 ```
 
-`bitsandbytes` is included because the shared-A100 configs use `--use_8bit_adam`. `wandb` is not installed by default; add it only if you will report training runs to Weights & Biases:
+`bitsandbytes` is included because the shared-A100 configs use `--use_8bit_adam`. The `semseg` extra is included so the same environment can reproduce the DeepLab experiments. `wandb` is not installed by default; add it only if you will report training runs to Weights & Biases:
 
 ```bash
 uv pip install -e ".[wandb]"

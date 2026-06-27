@@ -10,8 +10,8 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from torchvision import transforms
 from torch.utils.data import DataLoader
 
-from data.dataset.kitti_dataset import KittiDataset
-from model import DeeplabV3Resnet101
+from semseg.data.dataset.kitti_dataset import KittiDataset
+from semseg.model import DeeplabV3Resnet101
 
 
 def set_seed(seed=42):

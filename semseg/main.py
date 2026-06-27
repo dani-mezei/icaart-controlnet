@@ -10,8 +10,8 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from data.data_module import MixedDataModule
-from model import DeeplabV3Resnet101
+from semseg.data.data_module import MixedDataModule
+from semseg.model import DeeplabV3Resnet101
 
 
 SEED = 42
@@ -170,20 +170,26 @@ def parse_args(input_args=None):
         with open(args.load_json, "r") as f:
             t_args = argparse.Namespace()
             t_args.__dict__.update(json.load(f))
-            args = parser.parse_args(namespace=t_args)
+            args = parser.parse_args(input_args, namespace=t_args)
 
     if args.save_json is not None:
         with open(args.save_json, "w") as f:
             json.dump(vars(args), f, indent=4)
 
-    if not (
-        args.train_image_dir
-        or args.train_label_dir
-        or args.val_image_dir
-        or args.val_label_dir
-        or args.output_dir
-    ):
-        raise FileNotFoundError("You didn't provide all the needed input directories.")
+    required_paths = [
+        "train_image_dir",
+        "train_label_dir",
+        "val_image_dir",
+        "val_label_dir",
+        "output_dir",
+    ]
+    if args.use_synthetic_images:
+        required_paths.extend(["synthetic_image_dir", "synthetic_label_dir"])
+
+    missing_paths = [name for name in required_paths if not getattr(args, name)]
+    if missing_paths:
+        missing = ", ".join(missing_paths)
+        raise FileNotFoundError(f"Missing required arguments: {missing}")
 
     os.makedirs(args.output_dir, exist_ok=True)
 
